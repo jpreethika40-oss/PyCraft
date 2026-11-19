@@ -1,29 +1,33 @@
 /**
- * PyCraft Chat Interface - Phase 1
- * Handles chat messaging, DOM updates, loading states, and error handling.
+ * PyCraft Chat Application
+ * Handles chat messaging, multi-turn history, DOM updates, loading states, and error handling.
  */
 
 document.addEventListener("DOMContentLoaded", () => {
   const chatForm = document.getElementById("chat-form");
   const messageInput = document.getElementById("message-input");
   const sendButton = document.getElementById("send-button");
+  const emptyState = document.getElementById("empty-state");
   const messagesContainer = document.getElementById("messages-container");
   const messagesList = document.getElementById("messages-list");
-  const loadingIndicator = document.getElementById("loading-indicator");
   const errorBanner = document.getElementById("error-banner");
   const errorBannerText = document.getElementById("error-banner-text");
   const dismissErrorBtn = document.getElementById("dismiss-error-btn");
+  const newChatBtn = document.getElementById("new-chat-btn");
+  const suggestionCards = document.querySelectorAll(".suggestion-card");
+
+  // In-memory conversation history for this browser session
+  let conversationHistory = [];
 
   /**
-   * Scroll chat container smoothly to bottom.
+   * Scroll messages container smoothly to bottom.
    */
   function scrollToBottom() {
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
 
   /**
-   * Show an error banner at top of chat.
-   * @param {string} message - Error description
+   * Show error notification banner.
    */
   function showErrorBanner(message) {
     errorBannerText.textContent = message;
@@ -31,7 +35,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   /**
-   * Hide the error banner.
+   * Hide error notification banner.
    */
   function hideErrorBanner() {
     errorBanner.hidden = true;
@@ -41,76 +45,127 @@ document.addEventListener("DOMContentLoaded", () => {
   dismissErrorBtn.addEventListener("click", hideErrorBanner);
 
   /**
-   * Safely append a message bubble to the messages list using textContent.
-   * NEVER inserts user input or agent responses as raw HTML to prevent XSS.
+   * Reset conversation (New Chat).
+   */
+  function resetConversation() {
+    conversationHistory = [];
+    messagesList.innerHTML = "";
+    emptyState.hidden = false;
+    hideErrorBanner();
+    messageInput.value = "";
+    messageInput.style.height = "auto";
+    messageInput.focus();
+  }
+
+  if (newChatBtn) {
+    newChatBtn.addEventListener("click", resetConversation);
+  }
+
+  /**
+   * Wire suggestion cards in empty state.
+   */
+  suggestionCards.forEach((card) => {
+    card.addEventListener("click", () => {
+      const prompt = card.getAttribute("data-prompt");
+      if (prompt) {
+        messageInput.value = prompt;
+        adjustTextareaHeight();
+        chatForm.dispatchEvent(new Event("submit", { cancelable: true }));
+      }
+    });
+  });
+
+  /**
+   * Safely append a message bubble using textContent to prevent XSS.
+   * Speakers are differentiated purely through visual layout and styling.
    *
-   * @param {"user" | "agent"} sender - Who sent the message
+   * @param {"user" | "assistant"} sender - Who sent the message
    * @param {string} text - Message text
    * @param {boolean} [isError=false] - Whether this is an error bubble
    */
   function appendMessage(sender, text, isError = false) {
+    // Hide empty state once conversation starts
+    if (!emptyState.hidden) {
+      emptyState.hidden = true;
+    }
+
     const messageItem = document.createElement("div");
     messageItem.className = `message message-${sender}${isError ? " message-error" : ""}`;
 
-    // Metadata header
-    const metaDiv = document.createElement("div");
-    metaDiv.className = "message-meta";
+    const bubbleDiv = document.createElement("div");
+    bubbleDiv.className = "message-bubble";
+    bubbleDiv.textContent = text; // Safe text rendering
 
-    const senderSpan = document.createElement("span");
-    senderSpan.className = "sender-name";
-    senderSpan.textContent = sender === "user" ? "You" : "PyCraft";
-
-    const tagSpan = document.createElement("span");
-    tagSpan.className = "message-tag";
-    tagSpan.textContent = isError ? "Error" : (sender === "user" ? "User" : "Assistant");
-
-    metaDiv.appendChild(senderSpan);
-    metaDiv.appendChild(tagSpan);
-
-    // Message body (textContent guarantees raw text safety)
-    const contentDiv = document.createElement("div");
-    contentDiv.className = "message-content";
-    contentDiv.textContent = text;
-
-    messageItem.appendChild(metaDiv);
-    messageItem.appendChild(contentDiv);
-
+    messageItem.appendChild(bubbleDiv);
     messagesList.appendChild(messageItem);
     scrollToBottom();
   }
 
   /**
-   * Set loading UI state while awaiting backend response.
-   * @param {boolean} isLoading
+   * Show temporary typing indicator.
    */
-  function setLoadingState(isLoading) {
-    if (isLoading) {
-      loadingIndicator.hidden = false;
-      loadingIndicator.removeAttribute("aria-hidden");
-      sendButton.disabled = true;
-      messageInput.disabled = true;
-      scrollToBottom();
-    } else {
-      loadingIndicator.hidden = true;
-      loadingIndicator.setAttribute("aria-hidden", "true");
-      sendButton.disabled = false;
-      messageInput.disabled = false;
+  function showLoadingIndicator() {
+    // Hide empty state if first message
+    if (!emptyState.hidden) {
+      emptyState.hidden = true;
+    }
+
+    removeLoadingIndicator();
+
+    const indicator = document.createElement("div");
+    indicator.id = "active-loading-indicator";
+    indicator.className = "loading-indicator";
+    indicator.setAttribute("aria-live", "polite");
+    indicator.setAttribute("aria-label", "Loading response");
+
+    const dot1 = document.createElement("span");
+    dot1.className = "loading-dot";
+    const dot2 = document.createElement("span");
+    dot2.className = "loading-dot";
+    const dot3 = document.createElement("span");
+    dot3.className = "loading-dot";
+
+    indicator.appendChild(dot1);
+    indicator.appendChild(dot2);
+    indicator.appendChild(dot3);
+
+    messagesList.appendChild(indicator);
+    scrollToBottom();
+  }
+
+  /**
+   * Remove loading indicator from DOM.
+   */
+  function removeLoadingIndicator() {
+    const indicator = document.getElementById("active-loading-indicator");
+    if (indicator) {
+      indicator.remove();
+    }
+  }
+
+  /**
+   * Toggle composer controls (disable during pending requests).
+   */
+  function setComposerEnabled(enabled) {
+    sendButton.disabled = !enabled;
+    messageInput.disabled = !enabled;
+    if (enabled) {
       messageInput.focus();
     }
   }
 
   /**
-   * Auto-adjust textarea height based on content.
+   * Auto-adjust textarea height up to 160px.
    */
   function adjustTextareaHeight() {
     messageInput.style.height = "auto";
-    const newHeight = Math.min(messageInput.scrollHeight, 140);
+    const newHeight = Math.min(messageInput.scrollHeight, 160);
     messageInput.style.height = `${newHeight}px`;
   }
 
   messageInput.addEventListener("input", adjustTextareaHeight);
 
-  // Send message on Enter key (without Shift key)
+  // Send message on Enter key (Shift+Enter inserts newline)
   messageInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -119,7 +174,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   /**
-   * Form submission handler.
+   * Main Form Submit Handler.
    */
   chatForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -127,73 +182,89 @@ document.addEventListener("DOMContentLoaded", () => {
     const rawMessage = messageInput.value;
     const trimmedMessage = rawMessage.trim();
 
-    // Client-side validation: reject empty or whitespace-only messages
+    // 1. Client-side input validation
     if (!trimmedMessage) {
-      showErrorBanner("Cannot send an empty message. Please enter some text.");
+      showErrorBanner("Please enter a message before sending.");
       messageInput.focus();
       return;
     }
 
     hideErrorBanner();
 
-    // 1. Render user message safely
+    // 2. Append user message to conversation list
     appendMessage("user", trimmedMessage);
 
-    // 2. Clear input field and reset height
+    // 3. Add to local conversation history
+    conversationHistory.push({ role: "user", content: trimmedMessage });
+
+    // 4. Reset input box
     messageInput.value = "";
     messageInput.style.height = "auto";
 
-    // 3. Set loading state
-    setLoadingState(true);
+    // 5. Show typing indicator and lock composer
+    setComposerEnabled(false);
+    showLoadingIndicator();
 
     try {
-      // 4. Send request to FastAPI backend
+      // 6. Send request with conversation history to backend
       const response = await fetch("/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Accept": "application/json",
         },
-        body: JSON.stringify({ message: trimmedMessage }),
+        body: JSON.stringify({
+          message: trimmedMessage,
+          history: conversationHistory.slice(0, -1), // Prior history excluding current message
+        }),
       });
 
-      // 5. Handle HTTP errors
+      // 7. ALWAYS remove loading indicator BEFORE displaying response or error
+      removeLoadingIndicator();
+
       if (!response.ok) {
-        let errorMessage = `Server returned status ${response.status} (${response.statusText})`;
+        let errorMessage = `Server error (${response.status})`;
         try {
           const errorData = await response.json();
           if (errorData && errorData.detail) {
             errorMessage = errorData.detail;
           }
         } catch {
-          // If response body is not JSON, use default status text
+          // Fallback if response isn't JSON
         }
 
-        showErrorBanner(`Backend Error (${response.status}): ${errorMessage}`);
-        appendMessage("agent", `⚠️ Error (${response.status}): ${errorMessage}`, true);
+        showErrorBanner(errorMessage);
+        appendMessage("assistant", errorMessage, true);
+        // Remove the failed turn from history so it doesn't corrupt subsequent turns
+        conversationHistory.pop();
         return;
       }
 
-      // 6. Handle successful response
+      // 8. Handle successful AI response
       const data = await response.json();
       if (data && typeof data.reply === "string") {
-        appendMessage("agent", data.reply);
+        appendMessage("assistant", data.reply);
+        // Add assistant response to history for multi-turn follow-ups
+        conversationHistory.push({ role: "model", content: data.reply });
       } else {
-        throw new Error("Received an unexpected response format from backend.");
+        throw new Error("Received an unexpected response format from the server.");
       }
     } catch (error) {
-      // 7. Handle network failure or offline backend
-      console.error("PyCraft chat network error:", error);
-      const networkMessage =
-        "Unable to reach the PyCraft backend. Please verify that the server is running on http://127.0.0.1:8000.";
-      showErrorBanner(networkMessage);
-      appendMessage("agent", `⚠️ Connection Failure: ${networkMessage}`, true);
+      // 9. Handle network failure or unreachable server
+      console.error("PyCraft request error:", error);
+      removeLoadingIndicator();
+
+      const networkMsg =
+        "Unable to reach the PyCraft server. Please ensure the backend is running at http://127.0.0.1:8000.";
+      showErrorBanner(networkMsg);
+      appendMessage("assistant", networkMsg, true);
+      conversationHistory.pop();
     } finally {
-      // 8. Reset loading state
-      setLoadingState(false);
+      // 10. Re-enable composer controls and focus
+      setComposerEnabled(true);
     }
   });
 
-  // Focus message input on page load
+  // Focus message composer on load
   messageInput.focus();
 });
