@@ -3,13 +3,19 @@ import logging
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, Field
+
+from app.workspace import (
+    get_workspace_root,
+    list_workspace_files,
+    read_workspace_file,
+)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -25,19 +31,27 @@ ENV_FILE = PROJECT_ROOT / ".env"
 load_dotenv(dotenv_path=ENV_FILE)
 load_dotenv()
 
+# Initialize/verify workspace directory exists at startup
+WORKSPACE_ROOT = get_workspace_root()
+logger.info(f"Initialized PyCraft workspace at: {WORKSPACE_ROOT}")
+
 # Model configuration: default to gemini-3.5-flash-lite, with safe fallbacks
 DEFAULT_GEMINI_MODEL = "gemini-3.5-flash-lite"
 FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite"]
 
 app = FastAPI(
     title="PyCraft",
-    description="Your Personal AI Coding Agent - Backend Server",
-    version="0.2.0",
+    description="Your Personal AI Coding Agent - Backend Server with Restricted Workspace Tools",
+    version="0.3.0",
 )
 
 # Mount the static directory for CSS, JavaScript, and assets
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+
+# ---------------------------------------------------------------------------
+# Pydantic Request & Response Models
+# ---------------------------------------------------------------------------
 
 class MessageItem(BaseModel):
     role: str = Field(..., description="Message sender role: 'user' or 'model'")
@@ -54,14 +68,45 @@ class ChatResponse(BaseModel):
     status: str = Field(default="ok", description="Status indicator")
 
 
+class FileListResponse(BaseModel):
+    files: list[str] = Field(..., description="List of workspace-relative file paths")
+    count: int = Field(..., description="Total count of readable files in the workspace")
+
+
+class FileReadRequest(BaseModel):
+    path: str = Field(..., description="Workspace-relative path to the file to read")
+
+
+class FileReadResponse(BaseModel):
+    path: str = Field(..., description="Workspace-relative path of the file")
+    content: str = Field(..., description="Text content of the file (UTF-8)")
+    size: int = Field(..., description="File size in bytes")
+
+
+# ---------------------------------------------------------------------------
+# Global Validation Exception Handler
+# ---------------------------------------------------------------------------
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Provide a clean, readable error message for malformed JSON or missing fields."""
+    """Provide a clean, readable error message for malformed payloads or missing fields."""
+    errors = exc.errors()
+    if errors:
+        first_err = errors[0]
+        field = first_err.get("loc", ["payload"])[-1]
+        msg = first_err.get("msg", "Invalid field")
+        detail = f"Invalid request payload for '{field}': {msg}"
+    else:
+        detail = "Invalid request payload."
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": "Invalid request payload. A valid 'message' string is required."},
+        content={"detail": detail},
     )
 
+
+# ---------------------------------------------------------------------------
+# Frontend Web Route
+# ---------------------------------------------------------------------------
 
 @app.get("/", response_class=FileResponse, summary="Serve chat interface")
 async def serve_index():
@@ -74,6 +119,111 @@ async def serve_index():
         )
     return FileResponse(index_path)
 
+
+# ---------------------------------------------------------------------------
+# Workspace Tool Endpoints (Phase 3)
+# ---------------------------------------------------------------------------
+
+def _execute_read_file(path_str: str) -> FileReadResponse:
+    """Helper to read workspace file and map domain exceptions to HTTP status codes."""
+    try:
+        rel_path, content, size = read_workspace_file(path_str)
+        return FileReadResponse(path=rel_path, content=content, size=size)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        )
+    except IsADirectoryError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except ValueError as exc:
+        err_msg = str(exc)
+        if "exceeds maximum allowed size" in err_msg:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=err_msg,
+            )
+        elif "binary data" in err_msg or "UTF-8" in err_msg:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=err_msg,
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=err_msg,
+            )
+    except Exception as exc:
+        logger.error(f"Unexpected error reading workspace file '{path_str}': {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while reading the workspace file.",
+        )
+
+
+@app.get(
+    "/workspace/files",
+    response_model=FileListResponse,
+    summary="List readable files in workspace",
+    tags=["workspace"],
+)
+async def list_files_endpoint():
+    """
+    List all readable, non-excluded text files within the configured workspace.
+    Returns workspace-relative paths (using forward slashes) and the total file count.
+    """
+    try:
+        files = list_workspace_files()
+        return FileListResponse(files=files, count=len(files))
+    except Exception as exc:
+        logger.error(f"Error listing workspace files: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to list workspace files.",
+        )
+
+
+@app.get(
+    "/workspace/file",
+    response_model=FileReadResponse,
+    summary="Read a workspace text file (GET query param)",
+    tags=["workspace"],
+)
+async def read_file_get_endpoint(
+    path: str = Query(..., description="Workspace-relative path to the text file to read")
+):
+    """
+    Read the contents of a UTF-8 text file from the workspace via query parameter.
+    Validates containment, size limits, and UTF-8 encoding.
+    """
+    return _execute_read_file(path)
+
+
+@app.post(
+    "/workspace/read",
+    response_model=FileReadResponse,
+    summary="Read a workspace text file (POST JSON payload)",
+    tags=["workspace"],
+)
+async def read_file_post_endpoint(payload: FileReadRequest):
+    """
+    Read the contents of a UTF-8 text file from the workspace via JSON request payload.
+    Validates containment, size limits, and UTF-8 encoding.
+    """
+    return _execute_read_file(payload.path)
+
+
+# ---------------------------------------------------------------------------
+# Chat Endpoint (Phase 2)
+# ---------------------------------------------------------------------------
 
 @app.post("/chat", response_model=ChatResponse, summary="Receive chat message and return Gemini AI reply")
 async def chat_endpoint(payload: ChatRequest):
@@ -191,7 +341,7 @@ async def chat_endpoint(payload: ChatRequest):
                 last_status_code = status.HTTP_429_TOO_MANY_REQUESTS
                 last_error_detail = "Gemini rate limit reached. Please wait a few moments before trying again."
                 break
-            elif "404" in err_msg if "err_msg" in locals() else ("404" in err_text or "NOT_FOUND" in err_text):
+            elif "404" in err_text or "NOT_FOUND" in err_text:
                 last_error_detail = f"Model {model_name} is not available. Trying alternative model..."
                 continue
             elif "503" in err_text or "UNAVAILABLE" in err_text or "high demand" in err_text:

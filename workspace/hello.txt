@@ -1,0 +1,2 @@
+Hello! This is a sample file inside the PyCraft workspace.
+It demonstrates that the workspace tools can list and read text files safely.
