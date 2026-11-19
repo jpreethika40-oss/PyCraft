@@ -1,9 +1,11 @@
 /**
- * PyCraft Chat Application
- * Handles chat messaging, multi-turn history, DOM updates, loading states, and error handling.
+ * PyCraft Chat & Workspace Application
+ * Handles chat messaging, multi-turn history, DOM updates, loading states,
+ * error handling, and the interactive workspace file inspector panel.
  */
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Chat Elements
   const chatForm = document.getElementById("chat-form");
   const messageInput = document.getElementById("message-input");
   const sendButton = document.getElementById("send-button");
@@ -16,37 +18,68 @@ document.addEventListener("DOMContentLoaded", () => {
   const newChatBtn = document.getElementById("new-chat-btn");
   const suggestionCards = document.querySelectorAll(".suggestion-card");
 
+  // Workspace Panel Elements
+  const workspaceToggleBtn = document.getElementById("workspace-toggle-btn");
+  const workspaceBadge = document.getElementById("workspace-badge");
+  const workspacePanel = document.getElementById("workspace-panel");
+  const workspaceCloseBtn = document.getElementById("workspace-close-btn");
+  const workspaceRefreshBtn = document.getElementById("workspace-refresh-btn");
+  const workspaceBackdrop = document.getElementById("workspace-backdrop");
+  const workspaceLoading = document.getElementById("workspace-loading");
+  const workspaceError = document.getElementById("workspace-error");
+  const workspaceErrorText = document.getElementById("workspace-error-text");
+  const workspaceRetryBtn = document.getElementById("workspace-retry-btn");
+  const workspaceListView = document.getElementById("workspace-list-view");
+  const workspaceFileList = document.getElementById("workspace-file-list");
+  const workspaceEmpty = document.getElementById("workspace-empty");
+
+  // Workspace Viewer Elements
+  const workspaceViewer = document.getElementById("workspace-viewer");
+  const viewerBackBtn = document.getElementById("viewer-back-btn");
+  const viewerFilePath = document.getElementById("viewer-file-path");
+  const viewerFileSize = document.getElementById("viewer-file-size");
+  const viewerLoading = document.getElementById("viewer-loading");
+  const viewerError = document.getElementById("viewer-error");
+  const viewerErrorText = document.getElementById("viewer-error-text");
+  const viewerCode = document.getElementById("viewer-code");
+
   // In-memory conversation history for this browser session
   let conversationHistory = [];
+  let currentSelectedFile = null;
 
-  /**
-   * Scroll messages container smoothly to bottom.
-   */
+  // -------------------------------------------------------------------------
+  // Utility Functions
+  // -------------------------------------------------------------------------
+
   function scrollToBottom() {
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
 
-  /**
-   * Show error notification banner.
-   */
   function showErrorBanner(message) {
     errorBannerText.textContent = message;
     errorBanner.hidden = false;
   }
 
-  /**
-   * Hide error notification banner.
-   */
   function hideErrorBanner() {
     errorBanner.hidden = true;
     errorBannerText.textContent = "";
   }
 
-  dismissErrorBtn.addEventListener("click", hideErrorBanner);
+  if (dismissErrorBtn) {
+    dismissErrorBtn.addEventListener("click", hideErrorBanner);
+  }
 
-  /**
-   * Reset conversation (New Chat).
-   */
+  function formatBytes(bytes) {
+    if (typeof bytes !== "number" || isNaN(bytes)) return "";
+    if (bytes < 1024) return `${bytes} B`;
+    const kb = (bytes / 1024).toFixed(1);
+    return `${kb} KB`;
+  }
+
+  // -------------------------------------------------------------------------
+  // Chat Conversation Logic
+  // -------------------------------------------------------------------------
+
   function resetConversation() {
     conversationHistory = [];
     messagesList.innerHTML = "";
@@ -61,9 +94,6 @@ document.addEventListener("DOMContentLoaded", () => {
     newChatBtn.addEventListener("click", resetConversation);
   }
 
-  /**
-   * Wire suggestion cards in empty state.
-   */
   suggestionCards.forEach((card) => {
     card.addEventListener("click", () => {
       const prompt = card.getAttribute("data-prompt");
@@ -75,16 +105,7 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  /**
-   * Safely append a message bubble using textContent to prevent XSS.
-   * Speakers are differentiated purely through visual layout and styling.
-   *
-   * @param {"user" | "assistant"} sender - Who sent the message
-   * @param {string} text - Message text
-   * @param {boolean} [isError=false] - Whether this is an error bubble
-   */
   function appendMessage(sender, text, isError = false) {
-    // Hide empty state once conversation starts
     if (!emptyState.hidden) {
       emptyState.hidden = true;
     }
@@ -101,11 +122,7 @@ document.addEventListener("DOMContentLoaded", () => {
     scrollToBottom();
   }
 
-  /**
-   * Show temporary typing indicator.
-   */
   function showLoadingIndicator() {
-    // Hide empty state if first message
     if (!emptyState.hidden) {
       emptyState.hidden = true;
     }
@@ -133,9 +150,6 @@ document.addEventListener("DOMContentLoaded", () => {
     scrollToBottom();
   }
 
-  /**
-   * Remove loading indicator from DOM.
-   */
   function removeLoadingIndicator() {
     const indicator = document.getElementById("active-loading-indicator");
     if (indicator) {
@@ -143,9 +157,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  /**
-   * Toggle composer controls (disable during pending requests).
-   */
   function setComposerEnabled(enabled) {
     sendButton.disabled = !enabled;
     messageInput.disabled = !enabled;
@@ -154,9 +165,6 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  /**
-   * Auto-adjust textarea height up to 160px.
-   */
   function adjustTextareaHeight() {
     messageInput.style.height = "auto";
     const newHeight = Math.min(messageInput.scrollHeight, 160);
@@ -165,7 +173,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   messageInput.addEventListener("input", adjustTextareaHeight);
 
-  // Send message on Enter key (Shift+Enter inserts newline)
   messageInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -173,16 +180,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  /**
-   * Main Form Submit Handler.
-   */
   chatForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const rawMessage = messageInput.value;
     const trimmedMessage = rawMessage.trim();
 
-    // 1. Client-side input validation
     if (!trimmedMessage) {
       showErrorBanner("Please enter a message before sending.");
       messageInput.focus();
@@ -191,22 +194,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
     hideErrorBanner();
 
-    // 2. Append user message to conversation list
     appendMessage("user", trimmedMessage);
-
-    // 3. Add to local conversation history
     conversationHistory.push({ role: "user", content: trimmedMessage });
 
-    // 4. Reset input box
     messageInput.value = "";
     messageInput.style.height = "auto";
 
-    // 5. Show typing indicator and lock composer
     setComposerEnabled(false);
     showLoadingIndicator();
 
     try {
-      // 6. Send request with conversation history to backend
       const response = await fetch("/chat", {
         method: "POST",
         headers: {
@@ -215,11 +212,10 @@ document.addEventListener("DOMContentLoaded", () => {
         },
         body: JSON.stringify({
           message: trimmedMessage,
-          history: conversationHistory.slice(0, -1), // Prior history excluding current message
+          history: conversationHistory.slice(0, -1),
         }),
       });
 
-      // 7. ALWAYS remove loading indicator BEFORE displaying response or error
       removeLoadingIndicator();
 
       if (!response.ok) {
@@ -235,22 +231,21 @@ document.addEventListener("DOMContentLoaded", () => {
 
         showErrorBanner(errorMessage);
         appendMessage("assistant", errorMessage, true);
-        // Remove the failed turn from history so it doesn't corrupt subsequent turns
         conversationHistory.pop();
         return;
       }
 
-      // 8. Handle successful AI response
       const data = await response.json();
       if (data && typeof data.reply === "string") {
         appendMessage("assistant", data.reply);
-        // Add assistant response to history for multi-turn follow-ups
         conversationHistory.push({ role: "model", content: data.reply });
+
+        // Refresh workspace files after response in case files were touched
+        loadWorkspaceFiles();
       } else {
         throw new Error("Received an unexpected response format from the server.");
       }
     } catch (error) {
-      // 9. Handle network failure or unreachable server
       console.error("PyCraft request error:", error);
       removeLoadingIndicator();
 
@@ -260,10 +255,219 @@ document.addEventListener("DOMContentLoaded", () => {
       appendMessage("assistant", networkMsg, true);
       conversationHistory.pop();
     } finally {
-      // 10. Re-enable composer controls and focus
       setComposerEnabled(true);
     }
   });
+
+  // -------------------------------------------------------------------------
+  // Workspace Panel Logic
+  // -------------------------------------------------------------------------
+
+  function openWorkspace() {
+    workspacePanel.hidden = false;
+    // Force DOM reflow before adding transition class
+    void workspacePanel.offsetWidth;
+    workspacePanel.classList.add("is-open");
+    workspaceBackdrop.hidden = false;
+    workspaceToggleBtn.classList.add("is-active");
+    workspaceToggleBtn.setAttribute("aria-expanded", "true");
+    loadWorkspaceFiles();
+  }
+
+  function closeWorkspace() {
+    workspacePanel.classList.remove("is-open");
+    workspaceBackdrop.hidden = true;
+    workspaceToggleBtn.classList.remove("is-active");
+    workspaceToggleBtn.setAttribute("aria-expanded", "false");
+    setTimeout(() => {
+      if (!workspacePanel.classList.contains("is-open")) {
+        workspacePanel.hidden = true;
+      }
+    }, 250);
+  }
+
+  function toggleWorkspace() {
+    const isOpen = workspacePanel.classList.contains("is-open") && !workspacePanel.hidden;
+    if (isOpen) {
+      closeWorkspace();
+    } else {
+      openWorkspace();
+    }
+  }
+
+  if (workspaceToggleBtn) {
+    workspaceToggleBtn.addEventListener("click", toggleWorkspace);
+  }
+
+  if (workspaceCloseBtn) {
+    workspaceCloseBtn.addEventListener("click", closeWorkspace);
+  }
+
+  if (workspaceBackdrop) {
+    workspaceBackdrop.addEventListener("click", closeWorkspace);
+  }
+
+  if (workspaceRefreshBtn) {
+    workspaceRefreshBtn.addEventListener("click", () => {
+      loadWorkspaceFiles();
+    });
+  }
+
+  if (workspaceRetryBtn) {
+    workspaceRetryBtn.addEventListener("click", () => {
+      loadWorkspaceFiles();
+    });
+  }
+
+  /**
+   * Load files from GET /workspace/files and populate the panel list.
+   */
+  async function loadWorkspaceFiles() {
+    workspaceLoading.hidden = false;
+    workspaceError.hidden = true;
+    workspaceEmpty.hidden = true;
+
+    try {
+      const response = await fetch("/workspace/files", {
+        headers: { "Accept": "application/json" },
+      });
+
+      if (!response.ok) {
+        let errDetail = `Failed to list files (${response.status})`;
+        try {
+          const errData = await response.json();
+          if (errData && errData.detail) errDetail = errData.detail;
+        } catch {}
+        throw new Error(errDetail);
+      }
+
+      const data = await response.json();
+      const files = Array.isArray(data.files) ? data.files : [];
+      const count = typeof data.count === "number" ? data.count : files.length;
+
+      // Update badge
+      if (workspaceBadge) {
+        workspaceBadge.textContent = String(count);
+        workspaceBadge.hidden = count === 0;
+      }
+
+      // Render file list
+      workspaceFileList.innerHTML = "";
+
+      if (files.length === 0) {
+        workspaceEmpty.hidden = false;
+      } else {
+        files.forEach((filePath) => {
+          const li = document.createElement("li");
+          li.className = `workspace-file-item${filePath === currentSelectedFile ? " selected" : ""}`;
+          li.setAttribute("role", "button");
+          li.setAttribute("tabindex", "0");
+          li.setAttribute("title", `View ${filePath}`);
+
+          const iconSpan = document.createElement("span");
+          iconSpan.className = "workspace-file-item-icon";
+          iconSpan.textContent = "📄";
+
+          const nameSpan = document.createElement("span");
+          nameSpan.className = "workspace-file-item-name";
+          nameSpan.textContent = filePath; // Safe text rendering
+
+          li.appendChild(iconSpan);
+          li.appendChild(nameSpan);
+
+          li.addEventListener("click", () => {
+            viewWorkspaceFile(filePath);
+          });
+
+          li.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              viewWorkspaceFile(filePath);
+            }
+          });
+
+          workspaceFileList.appendChild(li);
+        });
+      }
+    } catch (err) {
+      console.error("Workspace file list error:", err);
+      workspaceErrorText.textContent = err.message || "Failed to load workspace files.";
+      workspaceError.hidden = false;
+    } finally {
+      workspaceLoading.hidden = true;
+    }
+  }
+
+  /**
+   * Fetch and display the content of a specific workspace file.
+   */
+  async function viewWorkspaceFile(filePath) {
+    currentSelectedFile = filePath;
+
+    // Highlight selected item in list
+    document.querySelectorAll(".workspace-file-item").forEach((item) => {
+      const name = item.querySelector(".workspace-file-item-name");
+      if (name && name.textContent === filePath) {
+        item.classList.add("selected");
+      } else {
+        item.classList.remove("selected");
+      }
+    });
+
+    // Switch view to previewer
+    workspaceListView.hidden = true;
+    workspaceViewer.hidden = false;
+
+    // Reset viewer states
+    viewerFilePath.textContent = filePath;
+    viewerFileSize.textContent = "";
+    viewerCode.textContent = "";
+    viewerError.hidden = true;
+    viewerLoading.hidden = false;
+
+    try {
+      const response = await fetch(`/workspace/file?path=${encodeURIComponent(filePath)}`, {
+        headers: { "Accept": "application/json" },
+      });
+
+      if (!response.ok) {
+        let errDetail = `Could not read file (${response.status})`;
+        try {
+          const errData = await response.json();
+          if (errData && errData.detail) errDetail = errData.detail;
+        } catch {}
+        throw new Error(errDetail);
+      }
+
+      const data = await response.json();
+      viewerFilePath.textContent = data.path; // Display relative path
+      viewerFileSize.textContent = formatBytes(data.size);
+      viewerCode.textContent = data.content; // Strictly safe DOM rendering
+    } catch (err) {
+      console.error("Error reading file:", err);
+      viewerErrorText.textContent = err.message || "Error reading file content.";
+      viewerError.hidden = false;
+    } finally {
+      viewerLoading.hidden = true;
+    }
+  }
+
+  function backToFileList() {
+    workspaceViewer.hidden = true;
+    workspaceListView.hidden = false;
+  }
+
+  if (viewerBackBtn) {
+    viewerBackBtn.addEventListener("click", backToFileList);
+  }
+
+  // Expose global helper for testing or programmatic refresh
+  window.refreshWorkspaceFiles = loadWorkspaceFiles;
+  window.viewWorkspaceFile = viewWorkspaceFile;
+  window.toggleWorkspace = toggleWorkspace;
+
+  // Initial silent load of workspace files on startup
+  loadWorkspaceFiles();
 
   // Focus message composer on load
   messageInput.focus();

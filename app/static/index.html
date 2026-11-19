@@ -8,13 +8,22 @@
 </head>
 <body>
   <div class="chat-app">
-    <!-- Header: Clean text-only PyCraft wordmark -->
+    <!-- Header: Clean text-only PyCraft wordmark and navigation -->
     <header class="chat-header">
       <div class="header-inner">
         <h1 class="brand-title">PyCraft</h1>
-        <button type="button" id="new-chat-btn" class="header-btn" title="Start a fresh conversation" aria-label="New Chat">
-          New Chat
-        </button>
+        <div class="header-actions">
+          <button type="button" id="workspace-toggle-btn" class="header-btn" title="View Workspace Files" aria-label="Toggle Workspace Files" aria-expanded="false">
+            <svg class="header-icon" viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
+              <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+            </svg>
+            <span>Workspace</span>
+            <span id="workspace-badge" class="workspace-badge" hidden>0</span>
+          </button>
+          <button type="button" id="new-chat-btn" class="header-btn" title="Start a fresh conversation" aria-label="New Chat">
+            New Chat
+          </button>
+        </div>
       </div>
     </header>
 
@@ -76,6 +85,76 @@
         </div>
       </form>
     </footer>
+
+    <!-- Workspace Panel (Collapsible Drawer) -->
+    <aside id="workspace-panel" class="workspace-panel" aria-label="Workspace Files" hidden>
+      <div class="workspace-header">
+        <div class="workspace-title-group">
+          <svg class="workspace-folder-icon" viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden="true">
+            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+          </svg>
+          <h2 class="workspace-title">Workspace Files</h2>
+        </div>
+        <div class="workspace-header-actions">
+          <button type="button" id="workspace-refresh-btn" class="icon-btn" title="Refresh files" aria-label="Refresh workspace files">
+            <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+              <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.099a1 1 0 01.762 1.185A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.608-1.234z" clip-rule="evenodd"/>
+            </svg>
+          </button>
+          <button type="button" id="workspace-close-btn" class="icon-btn close-btn" title="Close workspace panel" aria-label="Close workspace panel">
+            &times;
+          </button>
+        </div>
+      </div>
+
+      <div class="workspace-body">
+        <!-- Loading State -->
+        <div id="workspace-loading" class="workspace-state" hidden>
+          <div class="loading-spinner"></div>
+          <span>Loading files...</span>
+        </div>
+
+        <!-- Error State -->
+        <div id="workspace-error" class="workspace-state workspace-error-state" hidden>
+          <span id="workspace-error-text" class="workspace-error-text"></span>
+          <button type="button" id="workspace-retry-btn" class="workspace-retry-btn">Retry</button>
+        </div>
+
+        <!-- File List View -->
+        <div id="workspace-list-view" class="workspace-list-view">
+          <ul id="workspace-file-list" class="workspace-file-list" role="list"></ul>
+          <div id="workspace-empty" class="workspace-empty" hidden>
+            <p>No accessible files in workspace.</p>
+          </div>
+        </div>
+
+        <!-- File Content Preview (Read-only) -->
+        <div id="workspace-viewer" class="workspace-viewer" hidden>
+          <div class="viewer-top-bar">
+            <button type="button" id="viewer-back-btn" class="viewer-back-btn" aria-label="Back to file list">
+              &larr; Back
+            </button>
+            <div class="viewer-file-meta">
+              <span id="viewer-file-path" class="viewer-file-path"></span>
+              <span id="viewer-file-size" class="viewer-file-size"></span>
+            </div>
+          </div>
+          <div id="viewer-loading" class="workspace-state" hidden>
+            <div class="loading-spinner"></div>
+            <span>Reading file...</span>
+          </div>
+          <div id="viewer-error" class="workspace-state workspace-error-state" hidden>
+            <span id="viewer-error-text" class="workspace-error-text"></span>
+          </div>
+          <div id="viewer-content-container" class="viewer-content-container">
+            <pre class="viewer-pre"><code id="viewer-code" class="viewer-code"></code></pre>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Backdrop for mobile drawer -->
+    <div id="workspace-backdrop" class="workspace-backdrop" hidden></div>
   </div>
 
   <script src="/static/app.js"></script>

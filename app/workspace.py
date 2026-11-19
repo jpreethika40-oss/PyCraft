@@ -1,14 +1,26 @@
-"""Workspace management and file-reading security tools for PyCraft.
+"""Workspace management and file-reading/writing security tools for PyCraft.
 
-This module provides restricted, read-only file listing and reading
+This module provides restricted, sandboxed file listing, reading, and writing
 operations constrained strictly to a configured workspace directory.
 """
 
 import os
+import tempfile
 from pathlib import Path
 from typing import List, Optional
+from dotenv import load_dotenv
 
-# Maximum allowed file size for reading (100 KB)
+# Base directory paths
+_APP_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _APP_DIR.parent
+_ENV_FILE = _PROJECT_ROOT / ".env"
+
+# Explicitly load .env if present
+if _ENV_FILE.exists():
+    load_dotenv(dotenv_path=_ENV_FILE)
+load_dotenv()
+
+# Maximum allowed file size for reading and writing (100 KB)
 MAX_FILE_SIZE_BYTES = 100 * 1024
 
 # Files and directory names to exclude consistently
@@ -65,6 +77,8 @@ SENSITIVE_FILENAME_PATTERNS = {
     "id_dsa",
     "credentials",
     "secrets",
+    "api_key",
+    "token",
     ".npmrc",
     ".dockercfg",
 }
@@ -79,10 +93,10 @@ def get_workspace_root() -> Path:
     """
     env_path = os.getenv("PYCRAFT_WORKSPACE", "").strip()
     if env_path:
-        root = Path(env_path).resolve()
+        env_p = Path(env_path)
+        root = env_p.resolve() if env_p.is_absolute() else (_PROJECT_ROOT / env_p).resolve()
     else:
-        project_root = Path(__file__).resolve().parent.parent
-        root = (project_root / "workspace").resolve()
+        root = (_PROJECT_ROOT / "workspace").resolve()
 
     root.mkdir(parents=True, exist_ok=True)
     return root
@@ -124,22 +138,28 @@ def is_path_excluded(rel_path: Path) -> bool:
     return False
 
 
-def validate_and_resolve_path(rel_path_str: str, workspace_root: Optional[Path] = None) -> Path:
+def validate_and_resolve_path(
+    rel_path_str: str,
+    workspace_root: Optional[Path] = None,
+    for_write: bool = False,
+) -> Path:
     """
     Validate a workspace-relative path string and resolve it to an absolute Path.
 
     Safeguards:
     - Rejects empty paths.
-    - Rejects absolute paths (Windows drive letters, UNC, leading slashes).
+    - Rejects null byte characters.
+    - Rejects absolute paths (POSIX leading slash, UNC paths, Windows drive letters).
     - Rejects '..' directory traversal.
     - Rejects hidden and excluded files/directories.
     - Resolves symlinks and enforces strict workspace containment.
-    - Validates target exists and is a regular file.
+    - If for_write=False: validates target exists and is a regular file.
+    - If for_write=True: validates target directory/file stays inside workspace and is not an existing directory.
 
     Raises:
-        ValueError: For invalid path formats, traversals, or exclusions.
-        PermissionError: If path escapes the workspace root boundary.
-        FileNotFoundError: If the target does not exist or is excluded.
+        ValueError: For invalid path formats, traversals, or empty strings.
+        PermissionError: If path escapes the workspace root boundary or targets excluded/sensitive files.
+        FileNotFoundError: If the target does not exist (read mode) or is excluded.
         IsADirectoryError: If the resolved path points to a directory.
     """
     if workspace_root is None:
@@ -149,19 +169,27 @@ def validate_and_resolve_path(rel_path_str: str, workspace_root: Optional[Path] 
     if not clean_str:
         raise ValueError("File path cannot be empty.")
 
-    # Reject absolute paths (POSIX leading slash or Windows drive letter)
+    if "\x00" in clean_str:
+        raise ValueError("Path contains invalid null byte character.")
+
+    # Reject absolute paths (POSIX leading slash, UNC paths, Windows drive letter)
     if clean_str.startswith(("/", "\\")) or (len(clean_str) >= 2 and clean_str[1] == ":"):
         raise ValueError("Absolute paths are not allowed. Please provide a workspace-relative path.")
 
+    # Reject '..' traversal anywhere in the path parts (handling both / and \)
+    normalized_str = clean_str.replace("\\", "/")
+    parts = [p for p in normalized_str.split("/") if p]
     rel_path = Path(clean_str)
 
-    # Reject '..' traversal anywhere in the path parts
-    if ".." in rel_path.parts:
+    if ".." in parts or ".." in rel_path.parts:
         raise ValueError("Path traversal ('..') is not permitted.")
 
     # Check for excluded path segments or filenames
     if is_path_excluded(rel_path):
-        raise FileNotFoundError("The requested file is excluded or cannot be accessed.")
+        if for_write:
+            raise PermissionError("Writing to excluded or sensitive paths is not permitted.")
+        else:
+            raise FileNotFoundError("The requested file is excluded or cannot be accessed.")
 
     # Construct the target path within the workspace
     target_path = workspace_root / rel_path
@@ -173,29 +201,34 @@ def validate_and_resolve_path(rel_path_str: str, workspace_root: Optional[Path] 
     except Exception as exc:
         raise ValueError(f"Could not resolve path: {exc}")
 
-    # Enforce strict containment within the workspace
+    # Enforce strict containment within the workspace (blocks symlink escapes)
     try:
-        # Raises ValueError if resolved_path is not within resolved_root
         resolved_path.relative_to(resolved_root)
     except ValueError:
         raise PermissionError("Access denied: path resolves outside the workspace boundary.")
 
-    # Check existence
-    if not resolved_path.exists():
-        raise FileNotFoundError(f"File not found: '{clean_str}'")
-
-    # Reject directories
-    if resolved_path.is_dir():
-        raise IsADirectoryError(f"Path '{clean_str}' is a directory, not a regular file.")
-
-    # Ensure the resolved target is a regular file
-    if not resolved_path.is_file():
-        raise ValueError(f"Path '{clean_str}' is not a regular file.")
-
     # Post-resolution containment check for excluded names (in case of symlink renaming)
     rel_resolved = resolved_path.relative_to(resolved_root)
     if is_path_excluded(rel_resolved):
-        raise FileNotFoundError("The requested file is excluded or cannot be accessed.")
+        if for_write:
+            raise PermissionError("Writing to excluded or sensitive paths is not permitted.")
+        else:
+            raise FileNotFoundError("The requested file is excluded or cannot be accessed.")
+
+    if for_write:
+        # For writing: target cannot be an existing directory
+        if resolved_path.exists() and resolved_path.is_dir():
+            raise IsADirectoryError(f"Path '{clean_str}' is a directory, not a regular file.")
+    else:
+        # For reading: target must exist and be a regular file
+        if not resolved_path.exists():
+            raise FileNotFoundError(f"File not found: '{clean_str}'")
+
+        if resolved_path.is_dir():
+            raise IsADirectoryError(f"Path '{clean_str}' is a directory, not a regular file.")
+
+        if not resolved_path.is_file():
+            raise ValueError(f"Path '{clean_str}' is not a regular file.")
 
     return resolved_path
 
@@ -277,7 +310,7 @@ def read_workspace_file(rel_path_str: str, workspace_root: Optional[Path] = None
     if workspace_root is None:
         workspace_root = get_workspace_root()
 
-    resolved_path = validate_and_resolve_path(rel_path_str, workspace_root)
+    resolved_path = validate_and_resolve_path(rel_path_str, workspace_root, for_write=False)
     resolved_root = workspace_root.resolve()
     rel_display_path = resolved_path.relative_to(resolved_root).as_posix()
 
@@ -305,3 +338,107 @@ def read_workspace_file(rel_path_str: str, workspace_root: Optional[Path] = None
 
     return rel_display_path, content, file_size
 
+
+def write_workspace_file(
+    rel_path_str: str,
+    content: str,
+    overwrite: bool = False,
+    workspace_root: Optional[Path] = None,
+) -> tuple[str, str, int]:
+    """
+    Safely write UTF-8 text content to a file inside the configured workspace.
+
+    Safeguards:
+    - Strictly contained inside workspace root; traversal, absolute paths, and escapes are rejected.
+    - Excluded files (.env, .git, virtualenvs, caches, credentials, secrets) cannot be written.
+    - Only UTF-8 text is allowed, rejecting binary null bytes.
+    - Content size capped at MAX_FILE_SIZE_BYTES (100 KB).
+    - Existing files are protected from accidental overwrite unless overwrite=True.
+    - Parent directories created automatically if needed inside workspace.
+    - Uses atomic write (temp file + rename) to prevent partial or corrupted file writes.
+
+    Args:
+        rel_path_str: Workspace-relative path to the file.
+        content: UTF-8 text content to save.
+        overwrite: If True, replace existing file; if False, reject if already exists.
+        workspace_root: Optional explicit workspace root path.
+
+    Returns:
+        Tuple of (clean_relative_path, operation, bytes_written)
+        where operation is 'created' or 'updated'.
+
+    Raises:
+        FileExistsError: If file already exists and overwrite is False.
+        PermissionError: If path resolves outside workspace or targets excluded/sensitive file.
+        IsADirectoryError: If target path is a directory.
+        ValueError: For invalid path, traversal, oversized content, or binary data.
+    """
+    if workspace_root is None:
+        workspace_root = get_workspace_root()
+
+    # 1. Content validation
+    if not isinstance(content, str):
+        raise ValueError("Content must be a valid text string.")
+
+    if "\x00" in content:
+        raise ValueError("Content contains binary null bytes and cannot be written as text.")
+
+    try:
+        encoded_bytes = content.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("Content cannot be encoded as valid UTF-8 text.") from exc
+
+    file_size = len(encoded_bytes)
+    if file_size > MAX_FILE_SIZE_BYTES:
+        max_kb = MAX_FILE_SIZE_BYTES // 1024
+        file_kb = round(file_size / 1024, 1)
+        raise ValueError(
+            f"Content exceeds maximum allowed file size of {max_kb} KB ({file_kb} KB provided)."
+        )
+
+    # 2. Path validation and resolution (shares exact Phase 3 safeguards)
+    resolved_path = validate_and_resolve_path(rel_path_str, workspace_root, for_write=True)
+    resolved_root = workspace_root.resolve()
+    rel_display_path = resolved_path.relative_to(resolved_root).as_posix()
+
+    # 3. Check existing file state & overwrite permission
+    if resolved_path.exists():
+        if not overwrite:
+            raise FileExistsError(
+                f"File '{rel_display_path}' already exists and overwrite is set to false."
+            )
+        operation = "updated"
+    else:
+        operation = "created"
+
+    # 4. Atomic write using temporary file in the same directory
+    parent_dir = resolved_path.parent
+    parent_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create atomic temp file in the target directory
+    temp_file = tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=parent_dir,
+        delete=False,
+        prefix=f".tmp_{resolved_path.name}_",
+    )
+    temp_path = Path(temp_file.name)
+
+    try:
+        temp_file.write(content)
+        temp_file.flush()
+        os.fsync(temp_file.fileno())
+        temp_file.close()
+
+        # Atomic replacement of target file
+        os.replace(temp_path, resolved_path)
+    except Exception:
+        if temp_path.exists():
+            try:
+                temp_path.unlink()
+            except OSError:
+                pass
+        raise
+
+    return rel_display_path, operation, file_size

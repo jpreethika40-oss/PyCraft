@@ -15,6 +15,7 @@ from app.workspace import (
     get_workspace_root,
     list_workspace_files,
     read_workspace_file,
+    write_workspace_file,
 )
 
 # Setup logging
@@ -42,7 +43,7 @@ FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flas
 app = FastAPI(
     title="PyCraft",
     description="Your Personal AI Coding Agent - Backend Server with Restricted Workspace Tools",
-    version="0.3.0",
+    version="0.4.0",
 )
 
 # Mount the static directory for CSS, JavaScript, and assets
@@ -83,6 +84,19 @@ class FileReadResponse(BaseModel):
     size: int = Field(..., description="File size in bytes")
 
 
+class FileWriteRequest(BaseModel):
+    path: str = Field(..., description="Workspace-relative path to the file to create or update")
+    content: str = Field(..., description="UTF-8 text content to save")
+    overwrite: bool = Field(default=False, description="Whether to overwrite if file already exists")
+
+
+class FileWriteResponse(BaseModel):
+    path: str = Field(..., description="Workspace-relative path of the file")
+    operation: str = Field(..., description="Operation performed: 'created' or 'updated'")
+    bytes_written: int = Field(..., description="Number of bytes written to disk")
+    status: str = Field(default="ok", description="Status indicator")
+
+
 # ---------------------------------------------------------------------------
 # Global Validation Exception Handler
 # ---------------------------------------------------------------------------
@@ -121,7 +135,7 @@ async def serve_index():
 
 
 # ---------------------------------------------------------------------------
-# Workspace Tool Endpoints (Phase 3)
+# Workspace Tool Endpoints (Phase 3 & Phase 4)
 # ---------------------------------------------------------------------------
 
 def _execute_read_file(path_str: str) -> FileReadResponse:
@@ -166,6 +180,60 @@ def _execute_read_file(path_str: str) -> FileReadResponse:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred while reading the workspace file.",
+        )
+
+
+def _execute_write_file(payload: FileWriteRequest) -> FileWriteResponse:
+    """Helper to write workspace file and map domain exceptions to HTTP status codes."""
+    try:
+        rel_path, operation, bytes_written = write_workspace_file(
+            rel_path_str=payload.path,
+            content=payload.content,
+            overwrite=payload.overwrite,
+        )
+        return FileWriteResponse(
+            path=rel_path,
+            operation=operation,
+            bytes_written=bytes_written,
+            status="ok",
+        )
+    except FileExistsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        )
+    except IsADirectoryError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except ValueError as exc:
+        err_msg = str(exc)
+        if "exceeds maximum allowed file size" in err_msg:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail=err_msg,
+            )
+        elif "binary" in err_msg or "UTF-8" in err_msg:
+            raise HTTPException(
+                status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+                detail=err_msg,
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=err_msg,
+            )
+    except Exception as exc:
+        logger.error(f"Unexpected error writing workspace file '{payload.path}': {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while writing the workspace file.",
         )
 
 
@@ -219,6 +287,35 @@ async def read_file_post_endpoint(payload: FileReadRequest):
     Validates containment, size limits, and UTF-8 encoding.
     """
     return _execute_read_file(payload.path)
+
+
+@app.post(
+    "/workspace/write",
+    response_model=FileWriteResponse,
+    summary="Create or update a workspace text file (Phase 4)",
+    tags=["workspace"],
+)
+async def write_file_post_endpoint(payload: FileWriteRequest):
+    """
+    Safely create or update a UTF-8 text file within the workspace.
+    - If path does not exist, creates the file and any necessary parent directories.
+    - If path exists and overwrite=false, rejects with HTTP 409 Conflict.
+    - If path exists and overwrite=true, atomically replaces the file contents.
+    - Strictly rejects directory traversal, out-of-boundary paths, and sensitive files.
+    """
+    return _execute_write_file(payload)
+
+
+@app.post(
+    "/workspace/file",
+    response_model=FileWriteResponse,
+    summary="Create or update a workspace text file (Alias)",
+    tags=["workspace"],
+    include_in_schema=False,
+)
+async def write_file_alias_endpoint(payload: FileWriteRequest):
+    """Alias for POST /workspace/write."""
+    return _execute_write_file(payload)
 
 
 # ---------------------------------------------------------------------------
