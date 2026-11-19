@@ -1,4 +1,4 @@
-# PyCraft: Your Personal AI Coding Agent
+# PyCraft: My Personal AI Coding Agent
 
 > **Phase 1: Project Foundation & Chat Interface**
 
