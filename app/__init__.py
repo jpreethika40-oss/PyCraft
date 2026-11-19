@@ -1,0 +1,1 @@
+"""PyCraft package initialization."""

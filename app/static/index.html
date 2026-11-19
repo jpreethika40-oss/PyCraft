@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PyCraft - Your Personal AI Coding Agent</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="chat-app">
+    <!-- Header Section -->
+    <header class="chat-header">
+      <div class="header-content">
+        <div class="brand">
+          <div class="brand-icon" aria-hidden="true">⚡</div>
+          <div class="brand-text">
+            <h1 class="title">PyCraft</h1>
+            <p class="subtitle">Your Personal AI Coding Agent</p>
+          </div>
+        </div>
+        <div class="badge-container">
+          <span class="badge phase-badge">Phase 1: Foundation</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Error Banner for backend disconnection or server issues -->
+    <div id="error-banner" class="error-banner" role="alert" hidden>
+      <span class="error-icon" aria-hidden="true">⚠️</span>
+      <span id="error-banner-text" class="error-text"></span>
+      <button type="button" id="dismiss-error-btn" class="dismiss-btn" aria-label="Dismiss error">&times;</button>
+    </div>
+
+    <!-- Messages Display Area -->
+    <main id="messages-container" class="messages-container" aria-live="polite">
+      <div id="messages-list" class="messages-list">
+        <!-- Initial Agent Introduction Message -->
+        <div class="message message-agent">
+          <div class="message-meta">
+            <span class="sender-name">PyCraft</span>
+            <span class="message-tag">Assistant</span>
+          </div>
+          <div class="message-content">
+            Hello! I am <strong>PyCraft</strong> (v0.1 &mdash; Phase 1 Foundation).
+            <br><br>
+            This initial version establishes the chat interface and the FastAPI backend. Right now, I acknowledge your messages and verify that our client-server communication is working. In subsequent phases, an AI model will be connected, file inspection and editing tools will be integrated, and the autonomous coding agent loop will be activated.
+          </div>
+        </div>
+      </div>
+
+      <!-- Visible Loading State -->
+      <div id="loading-indicator" class="message message-agent loading-message" hidden aria-hidden="true">
+        <div class="message-meta">
+          <span class="sender-name">PyCraft</span>
+          <span class="message-tag">Processing</span>
+        </div>
+        <div class="message-content loading-content">
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="dot"></span>
+          <span class="loading-label">PyCraft is thinking...</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Chat Input Area -->
+    <footer class="chat-footer">
+      <form id="chat-form" class="chat-form">
+        <div class="input-wrapper">
+          <textarea
+            id="message-input"
+            class="message-input"
+            rows="1"
+            placeholder="Type a message... (Press Enter to send, Shift+Enter for newline)"
+            aria-label="Chat message input"
+            required
+          ></textarea>
+          <button type="submit" id="send-button" class="send-button" aria-label="Send message">
+            <span>Send</span>
+            <svg class="send-icon" viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+              <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/>
+            </svg>
+          </button>
+        </div>
+        <div class="input-hint">
+          <span>Phase 1 Prototype &bull; Serving from FastAPI</span>
+        </div>
+      </form>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
