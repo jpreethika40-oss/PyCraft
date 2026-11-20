@@ -1,13 +1,13 @@
 # PyCraft: My Personal AI Coding Agent
 
-PyCraft is an AI coding agent designed to run in a browser-based chat interface backed by Python. When fully realized, PyCraft will inspect and edit project files within a workspace to help developers write, debug, and understand code.
+PyCraft is an AI coding agent running in a clean browser-based chat interface backed by Python. PyCraft autonomously inspects, reads, creates, and updates project files within a restricted workspace to help developers write, understand, and debug code.
 
 This project is built and documented incrementally across phases:
 - **Phase 1:** Project Foundation, Web Chat Interface & FastAPI Server *(Complete)*
 - **Phase 2:** Google Gemini AI Model Integration (`google-genai` SDK) & Multi-Turn Chat *(Complete)*
 - **Phase 3:** Restricted Workspace Tools: Safe File Listing & Text File Reading *(Complete)*
 - **Phase 4:** Restricted Workspace Tools: Safe File Creation & Atomic Updates *(Complete)*
-- **Phase 5:** Autonomous Coding Agent Loop, Function Calling & Terminal Tools *(Planned)*
+- **Phase 5:** Autonomous Coding Agent Loop, Function Calling & Workspace Tools *(Complete)*
 
 ---
 
@@ -16,11 +16,12 @@ This project is built and documented incrementally across phases:
 - **Language:** Python 3.10+
 - **Backend Framework:** [FastAPI](https://fastapi.tiangolo.com/) for high performance, automatic request validation, and lightweight routing.
 - **ASGI Server:** [Uvicorn](https://www.uvicorn.org/) to run the FastAPI application.
-- **AI SDK (Phase 2):** [google-genai](https://github.com/googleapis/python-genai) official Google GenAI Python SDK.
-- **AI Model (Phase 2):** Google Gemini (`gemini-3.5-flash-lite` by default, configurable via `GEMINI_MODEL`, with automatic fallback support).
+- **AI SDK (Phase 2 & 5):** [google-genai](https://github.com/googleapis/python-genai) official Google GenAI Python SDK.
+- **AI Model:** Google Gemini (`gemini-3.5-flash-lite` by default, configurable via `GEMINI_MODEL`, with automatic fallback support).
 - **Workspace Security (Phases 3 & 4):** Sandboxed path containment module in `app/workspace.py` providing strict directory jail, size caps, UTF-8 encoding validation, and atomic writes.
-- **Frontend:** Clean, responsive HTML5, CSS3, and modern JavaScript (no heavy frontend frameworks or build steps required).
-- **Communication:** HTTP JSON endpoints (`GET /` to serve UI, `POST /chat` for conversational AI, `GET /workspace/files`, `GET /workspace/file`, `POST /workspace/read`, and `POST /workspace/write` for workspace operations).
+- **Agent Orchestrator (Phase 5):** Multi-turn tool execution loop in `app/agent.py` with strict tool allowlist, accidental overwrite safeguards, and Server-Sent Events (SSE) activity streaming.
+- **Frontend:** Clean, responsive HTML5, CSS3, and modern JavaScript with collapsible Workspace panel, file previewer, and real-time tool activity indicators.
+- **Communication:** HTTP JSON endpoints and Server-Sent Events (`GET /` to serve UI, `POST /chat` for conversational AI & SSE streaming, `GET /workspace/files`, `GET /workspace/file`, `POST /workspace/read`, and `POST /workspace/write` for workspace operations).
 
 ---
 
@@ -32,14 +33,16 @@ PyCraft/
 │   ├── __init__.py           # Package marker for the app module
 │   ├── main.py               # FastAPI routes, input validation & API endpoints
 │   ├── workspace.py          # Workspace isolation, path containment & safe read/write tools
+│   ├── agent.py              # Autonomous agent loop, function calling & strict tool allowlist
 │   └── static/
-│       ├── index.html        # Clean, responsive chat interface
-│       ├── styles.css        # Modern responsive dark/light styles
-│       └── app.js            # Client-side chat logic, session history & safe DOM rendering
+│       ├── index.html        # Clean, responsive chat interface with workspace panel
+│       ├── styles.css        # Modern responsive dark/light styles & activity indicators
+│       └── app.js            # Client-side chat logic, SSE streaming, file viewer & safe DOM rendering
 ├── workspace/                # Default isolated workspace directory for file operations
 │   └── hello.txt             # Sample workspace file
 ├── tests/
-│   └── test_workspace.py     # Automated test suite (32 tests) for workspace safeguards & endpoints
+│   ├── test_workspace.py     # Automated test suite (34 tests) for workspace safeguards & endpoints
+│   └── test_agent.py         # Automated test suite (18 tests) for agent loop & tool orchestration
 ├── .env.example              # Environment variables template (GEMINI_API_KEY, GEMINI_MODEL, PYCRAFT_WORKSPACE)
 ├── .gitignore                # Ignores venv, caches, local .env & OS files
 ├── requirements.txt          # Python dependencies (fastapi, uvicorn, google-genai)
@@ -52,7 +55,7 @@ PyCraft/
 
 ### 1. Prerequisites
 - Python 3.10 or higher installed on your machine.
-- A Google Gemini API Key from [Google AI Studio](https://aistudio.google.com/) (required for Phase 2 chat).
+- A Google Gemini API Key from [Google AI Studio](https://aistudio.google.com/) (required for Phase 2 chat and Phase 5 agent).
 
 ### 2. Create and Activate Virtual Environment
 
@@ -73,6 +76,15 @@ python -m venv .venv
 Install all dependencies (FastAPI, Uvicorn, and Google GenAI SDK):
 ```powershell
 pip install -r requirements.txt
+```
+
+### 4. Configure Environment Variables
+
+Create a `.env` file in the project root:
+```env
+GEMINI_API_KEY=your_actual_gemini_api_key_here
+GEMINI_MODEL=gemini-3.5-flash-lite
+PYCRAFT_WORKSPACE=workspace
 ```
 
 ---
@@ -116,9 +128,6 @@ In **Phase 2**, the temporary response stub was replaced with live calls to the 
 
 In **Phases 3 and 4**, PyCraft provides a sandboxed workspace service (`app/workspace.py`) and dedicated REST endpoints for safely listing, reading, creating, and updating text files inside the workspace.
 
-> [!IMPORTANT]
-> In Phase 4, these workspace tools are exposed as dedicated FastAPI endpoints for independent testing and verification. They are **not** connected to Gemini or the chat UI yet. Automated AI tool execution and the agent loop are deferred to Phase 5.
-
 ### 1. Workspace Configuration
 The workspace root directory is determined as follows:
 - Configured via the `PYCRAFT_WORKSPACE` environment variable (e.g. `PYCRAFT_WORKSPACE=workspace` or `PYCRAFT_WORKSPACE=C:\custom\path`).
@@ -153,6 +162,63 @@ All read and write operations in `app/workspace.py` strictly enforce defense-in-
 
 ---
 
+## Phase 5: Autonomous Coding Agent Loop & Function Calling
+
+In **Phase 5**, PyCraft connects Google Gemini directly to its sandboxed workspace file tools via an autonomous multi-turn agent loop (`app/agent.py`).
+
+### Agent Loop Workflow:
+```text
+  User Message
+       │
+       ▼
+┌──────────────┐
+│  FastAPI     │ ────► Initializes Google GenAI Client with tools & conversation
+│  /chat route │
+└──────────────┘
+       │
+       ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                          Agent Loop (Max 6 Iterations)                 │
+│                                                                        │
+│   1. Model Generation: Gemini analyzes context and tool declarations    │
+│                                                                        │
+│   2. Tool Call Requested?                                              │
+│        ├─ NO  ──► Extract final text answer ──► Return to user         │
+│        │                                                               │
+│        └─ YES ──► Check tool allowlist:                                 │
+│                   - list_workspace_files                               │
+│                   - read_workspace_file                                │
+│                   - write_workspace_file                               │
+│                   Broadcast activity update (SSE)                      │
+│                   Execute approved Python workspace function           │
+│                   Format FunctionResponse (role="user")                │
+│                   Append response to contents ──► Loop back to step 1  │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Capabilities & Safeguards:
+
+1. **Strict Tool Allowlist (`TOOL_ALLOWLIST`):**
+   Only three approved Python functions are exposed to the model:
+   - `list_workspace_files`: list relative paths of readable text files.
+   - `read_workspace_file`: read UTF-8 content of a workspace-relative file.
+   - `write_workspace_file`: create or update a UTF-8 text file.
+   Any unapproved function or arbitrary code execution request is immediately rejected.
+
+2. **Accidental Overwrite Confirmation Rule:**
+   The agent will **never** silently overwrite an existing file. If the model attempts to write to a path that already exists in the workspace, `check_user_overwrite_confirmation` verifies whether the user explicitly authorized replacing that file. A tool argument alone (`overwrite: true` generated by the model) is NOT sufficient. If unconfirmed, the tool returns a conflict status, and the agent asks the user for explicit confirmation before overwriting.
+
+3. **Real-Time Activity Indicators (SSE Streaming):**
+   When the browser client connects using `Accept: text/event-stream`, the agent loop streams live activity updates (e.g. *"Listing workspace files..."*, *"Reading hello.txt..."*, *"Writing notes.txt..."*) directly into the chat bubble, replacing the generic typing dots with transparent progress.
+
+4. **Automatic Workspace Panel Synchronization:**
+   Whenever the agent loop creates or updates a file (`files_modified = True`), the chat UI automatically triggers a refresh of the Workspace file list so the user immediately sees the changes.
+
+5. **Loop Termination Protection:**
+   The agent loop enforces `MAX_TOOL_ITERATIONS = 6` to prevent runaway or looping tool calls, terminating gracefully if a model exceeds the threshold.
+
+---
+
 ## Complete API Reference
 
 ### Frontend & Chat Endpoints
@@ -162,11 +228,14 @@ All read and write operations in `app/workspace.py` strictly enforce defense-in-
 - **Response:** HTML web page (Status 200).
 
 #### 2. `POST /chat`
-- **Purpose:** Receives user chat message and prior conversation history, forwards to Gemini, and returns the AI reply.
+- **Purpose:** Receives user chat message and prior conversation history, executes the multi-turn agent loop with Gemini and workspace tools, and returns the AI reply.
+- **Headers:**
+  - `Accept: text/event-stream` (optional): Stream real-time activity events and final response via Server-Sent Events.
+  - `Accept: application/json` (default): Return standard JSON response.
 - **Request Body (JSON):**
   ```json
   {
-    "message": "Explain binary search in Python",
+    "message": "List my workspace files and tell me what is inside hello.txt",
     "history": [
       {"role": "user", "content": "Hi"},
       {"role": "model", "content": "Hello! How can I help you today?"}
@@ -176,8 +245,10 @@ All read and write operations in `app/workspace.py` strictly enforce defense-in-
 - **Response Body (JSON - Status 200 OK):**
   ```json
   {
-    "reply": "Binary search is an efficient algorithm...",
-    "status": "ok"
+    "reply": "Your workspace contains hello.txt. Inside, it says: ...",
+    "status": "ok",
+    "tools_used": ["list_workspace_files", "read_workspace_file"],
+    "files_modified": false
   }
   ```
 
@@ -217,53 +288,26 @@ All read and write operations in `app/workspace.py` strictly enforce defense-in-
     "path": "hello.txt"
   }
   ```
-- **Response Body (JSON - Status 200 OK):**
-  ```json
-  {
-    "path": "hello.txt",
-    "content": "Hello! This is a sample file inside the PyCraft workspace.\n...",
-    "size": 137
-  }
-  ```
 
 #### 6. `POST /workspace/write`
 - **Purpose:** Safely create a new text file or update an existing text file inside the workspace.
 - **Request Body (JSON):**
   ```json
   {
-    "path": "docs/todo.txt",
-    "content": "1. Review Phase 4\n2. Plan Phase 5",
+    "path": "notes.txt",
+    "content": "PyCraft agent working smoothly!",
     "overwrite": false
   }
   ```
 - **Response Body (JSON - Status 200 OK):**
   ```json
   {
-    "path": "docs/todo.txt",
+    "path": "notes.txt",
     "operation": "created",
-    "bytes_written": 35,
+    "bytes_written": 32,
     "status": "ok"
   }
   ```
-
-#### Workspace Error Responses:
-- **HTTP 400 Bad Request:**
-  - Path traversal: `{"detail": "Path traversal ('..') is not permitted."}`
-  - Absolute path: `{"detail": "Absolute paths are not allowed. Please provide a workspace-relative path."}`
-  - Directory target: `{"detail": "Path 'subfolder' is a directory, not a regular file."}`
-  - Empty path: `{"detail": "File path cannot be empty."}`
-- **HTTP 403 Forbidden:**
-  - Workspace boundary escape / out-of-jail symlink: `{"detail": "Access denied: path resolves outside the workspace boundary."}`
-  - Excluded or sensitive file (`.env`, `.git`, credentials): `{"detail": "Writing to excluded or sensitive paths is not permitted."}`
-- **HTTP 404 Not Found:**
-  - Non-existent file on read: `{"detail": "File not found: 'missing.txt'"}`
-  - Excluded file on read: `{"detail": "The requested file is excluded or cannot be accessed."}`
-- **HTTP 409 Conflict:**
-  - Existing file with `overwrite: false`: `{"detail": "File 'hello.txt' already exists and overwrite is set to false."}`
-- **HTTP 413 Content Too Large:**
-  - Content exceeds 100 KB: `{"detail": "Content exceeds maximum allowed file size of 100 KB..."}`
-- **HTTP 415 Unsupported Media Type:**
-  - Binary or non-UTF-8 content: `{"detail": "Content contains binary null bytes and cannot be written as text."}`
 
 ---
 
@@ -273,73 +317,30 @@ All read and write operations in `app/workspace.py` strictly enforce defense-in-
 ```powershell
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
+Open your browser to: **`http://127.0.0.1:8000/`**
 
-### 2. Verify Creating a New File (Phase 4)
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/workspace/write" `
-  -Method POST `
-  -Headers @{"Content-Type"="application/json"} `
-  -Body '{"path": "notes.txt", "content": "Phase 4 write test successful!", "overwrite": false}' | ConvertTo-Json
-```
-Expected output:
-```json
-{
-  "path": "notes.txt",
-  "operation": "created",
-  "bytes_written": 31,
-  "status": "ok"
-}
-```
+### 2. Test Autonomous Tool Calling via Browser Chat
 
-### 3. Verify Accidental Overwrite Protection (HTTP 409 Conflict)
-Attempt to write to `notes.txt` again without setting `overwrite: true`:
-```powershell
-try {
-    Invoke-RestMethod -Uri "http://127.0.0.1:8000/workspace/write" `
-      -Method POST `
-      -Headers @{"Content-Type"="application/json"} `
-      -Body '{"path": "notes.txt", "content": "Overwriting without permission", "overwrite": false}'
-} catch {
-    $_.Exception.Response.StatusCode.value__
-    $_.ErrorDetails.Message
-}
-```
-Expected status: `409 Conflict` ("File 'notes.txt' already exists and overwrite is set to false.")
+Try asking PyCraft the following prompts in the chat:
+1. **List Workspace Files:**
+   > *"What files do I have in my workspace?"*
+   - PyCraft will display *"Listing workspace files..."* in the typing indicator, call `list_workspace_files`, and reply with the list of files (`hello.txt`).
 
-### 4. Verify Updating an Existing File (overwrite: true)
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/workspace/write" `
-  -Method POST `
-  -Headers @{"Content-Type"="application/json"} `
-  -Body '{"path": "notes.txt", "content": "Updated content with overwrite true", "overwrite": true}' | ConvertTo-Json
-```
-Expected output:
-```json
-{
-  "path": "notes.txt",
-  "operation": "updated",
-  "bytes_written": 35,
-  "status": "ok"
-}
-```
+2. **Read Workspace File:**
+   > *"What is written inside hello.txt?"*
+   - PyCraft will display *"Reading hello.txt..."*, call `read_workspace_file`, and explain the content.
 
-### 5. Verify Security Defense on Writes
-Attempt to write to `.env`:
-```powershell
-try {
-    Invoke-RestMethod -Uri "http://127.0.0.1:8000/workspace/write" `
-      -Method POST `
-      -Headers @{"Content-Type"="application/json"} `
-      -Body '{"path": ".env", "content": "LEAK=true", "overwrite": true}'
-} catch {
-    $_.Exception.Response.StatusCode.value__
-    $_.ErrorDetails.Message
-}
-```
-Expected status: `403 Forbidden` ("Writing to excluded or sensitive paths is not permitted.")
+3. **Create a New File:**
+   > *"Create a file named todo.txt with a list of 3 items for a coding project."*
+   - PyCraft will display *"Writing todo.txt..."*, create the file in the workspace, and automatically refresh the Workspace panel to show `todo.txt`.
 
-### 6. Run Full Automated Test Suite
-Run all 32 tests (covering listing, reading, creating, updating, and all security safeguards):
+4. **Accidental Overwrite Protection:**
+   > *"Save the word Test into hello.txt."*
+   - PyCraft will inspect the file, note that `hello.txt` already exists, and ask you for confirmation: *"The file 'hello.txt' already exists in the workspace. Would you like to overwrite it?"*
+   - Replying *"Yes, overwrite it"* will proceed with the update.
+
+### 3. Run Full Automated Test Suite
+Run all 52 automated unit and integration tests across all phases:
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p "test_*.py" -v
 ```
@@ -350,14 +351,15 @@ Run all 32 tests (covering listing, reading, creating, updating, and all securit
 
 | Capability | Phase 1 (Foundation) | Phase 2 (Gemini Chat) | Phase 3 (Read Tools) | Phase 4 (Write Tools) | Phase 5 (Agent Loop) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Web UI** | Clean chat interface | Refined product design | Unchanged (isolated) | Unchanged (isolated) | Tool status & file viewer |
-| **Backend Server** | FastAPI foundation | FastAPI + `google-genai` | FastAPI + Workspace read | FastAPI + Workspace write | Agent tool orchestrator |
-| **AI Integration** | Echo stub | **Live Gemini Model** | Live Gemini Model | Live Gemini Model | Autonomous tool calling |
-| **Workspace Listing**| None | None | **Safe file listing** | Safe file listing | File watcher |
-| **Workspace Reading**| None | None | **Jailed UTF-8 reader** | Jailed UTF-8 reader | Windowed reader |
-| **Workspace Writing**| None | None | None | **Safe atomic write/update**| Autonomous code patcher |
-| **Terminal / Commands**| None | None | None | None | Sandboxed CLI runner |
-| **Agent Loop** | None | None | None | None | Multi-step reasoning loop |
+| **Web UI** | Clean chat interface | Refined product design | Unchanged (isolated) | Workspace panel & previewer | **Real-time activity & auto-refresh** |
+| **Backend Server** | FastAPI foundation | FastAPI + `google-genai` | FastAPI + Workspace read | FastAPI + Workspace write | **Agent orchestrator & SSE streaming** |
+| **AI Integration** | Echo stub | Live Gemini Model | Live Gemini Model | Live Gemini Model | **Autonomous tool calling** |
+| **Workspace Listing**| None | None | Safe file listing | Safe file listing | **Autonomous `list_workspace_files`** |
+| **Workspace Reading**| None | None | Jailed UTF-8 reader | Jailed UTF-8 reader | **Autonomous `read_workspace_file`** |
+| **Workspace Writing**| None | None | None | Safe atomic write/update | **Autonomous `write_workspace_file`** |
+| **Overwrite Safety** | None | None | None | HTTP 409 Conflict check | **Explicit user confirmation check** |
+| **Safety Limits** | None | None | 100 KB limit | 100 KB limit | **Max 6 iterations limit + tool allowlist** |
+| **Agent Loop** | None | None | None | None | **Multi-turn reasoning & tool loop** |
 
 ---
 
@@ -365,8 +367,8 @@ Run all 32 tests (covering listing, reading, creating, updating, and all securit
 
 - **Zero Secret Leakage:** The API key is read solely by the backend via environment variables. It is never exposed in frontend code, responses, logs, or repository files.
 - **Strict Containment:** The workspace tools cannot be tricked into reading or writing files outside the designated workspace root via symlinks or directory traversal.
-- **Sensitive File Exclusion:** Files such as `.env`, `.git`, virtual environments, and credential files cannot be read, listed, created, or modified.
+- **Strict Allowlist:** The agent can only execute functions registered in `TOOL_ALLOWLIST`. Unknown tool calls, shell execution, or arbitrary command execution are strictly rejected.
+- **Accidental Data Loss Prevention:** Existing files cannot be replaced without explicit confirmation from the user.
 - **Atomic Operations:** Interrupted writes cannot leave corrupted or empty files.
-- **XSS Prevention:** All user messages and AI responses are safely injected into the DOM using `textContent`.
-- **Error Redaction:** Provider and internal exceptions are sanitized before returning error details to clients.
+- **XSS Prevention:** All user messages, file contents, and AI responses are safely injected into the DOM using `textContent`.
 - **Single-Origin:** Frontend assets and backend endpoints share the same FastAPI instance, eliminating CORS complexity.

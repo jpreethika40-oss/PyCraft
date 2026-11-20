@@ -1,6 +1,6 @@
 /**
  * PyCraft Chat & Workspace Application
- * Handles chat messaging, multi-turn history, DOM updates, loading states,
+ * Handles chat messaging, multi-turn history, DOM updates, loading states with tool activities,
  * error handling, and the interactive workspace file inspector panel.
  */
 
@@ -122,7 +122,7 @@ document.addEventListener("DOMContentLoaded", () => {
     scrollToBottom();
   }
 
-  function showLoadingIndicator() {
+  function showLoadingIndicator(activityText = "") {
     if (!emptyState.hidden) {
       emptyState.hidden = true;
     }
@@ -133,7 +133,10 @@ document.addEventListener("DOMContentLoaded", () => {
     indicator.id = "active-loading-indicator";
     indicator.className = "loading-indicator";
     indicator.setAttribute("aria-live", "polite");
-    indicator.setAttribute("aria-label", "Loading response");
+    indicator.setAttribute("aria-label", "Processing request");
+
+    const dotsGroup = document.createElement("div");
+    dotsGroup.className = "loading-dots-group";
 
     const dot1 = document.createElement("span");
     dot1.className = "loading-dot";
@@ -142,12 +145,27 @@ document.addEventListener("DOMContentLoaded", () => {
     const dot3 = document.createElement("span");
     dot3.className = "loading-dot";
 
-    indicator.appendChild(dot1);
-    indicator.appendChild(dot2);
-    indicator.appendChild(dot3);
+    dotsGroup.appendChild(dot1);
+    dotsGroup.appendChild(dot2);
+    dotsGroup.appendChild(dot3);
+    indicator.appendChild(dotsGroup);
+
+    const textSpan = document.createElement("span");
+    textSpan.id = "active-activity-text";
+    textSpan.className = "loading-activity-text";
+    textSpan.textContent = activityText || "";
+    indicator.appendChild(textSpan);
 
     messagesList.appendChild(indicator);
     scrollToBottom();
+  }
+
+  function updateLoadingActivity(text) {
+    const textSpan = document.getElementById("active-activity-text");
+    if (textSpan) {
+      textSpan.textContent = text ? ` ${text}` : "";
+      scrollToBottom();
+    }
   }
 
   function removeLoadingIndicator() {
@@ -208,7 +226,7 @@ document.addEventListener("DOMContentLoaded", () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Accept": "application/json",
+          "Accept": "text/event-stream, application/json",
         },
         body: JSON.stringify({
           message: trimmedMessage,
@@ -216,34 +234,81 @@ document.addEventListener("DOMContentLoaded", () => {
         }),
       });
 
-      removeLoadingIndicator();
+      const contentType = response.headers.get("content-type") || "";
 
-      if (!response.ok) {
-        let errorMessage = `Server error (${response.status})`;
-        try {
-          const errorData = await response.json();
-          if (errorData && errorData.detail) {
-            errorMessage = errorData.detail;
+      if (contentType.includes("text/event-stream") && response.body) {
+        // SSE streaming response mode
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+        let finalReply = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop(); // Keep uncompleted tail in buffer
+
+          for (const block of lines) {
+            const dataMatch = block.match(/data:\s*(.+)/s);
+            if (!dataMatch) continue;
+            try {
+              const eventData = JSON.parse(dataMatch[1].trim());
+              if (eventData.type === "activity") {
+                updateLoadingActivity(eventData.activity);
+              } else if (eventData.type === "done") {
+                finalReply = eventData.reply;
+              } else if (eventData.type === "error") {
+                removeLoadingIndicator();
+                showErrorBanner(eventData.detail);
+                appendMessage("assistant", eventData.detail, true);
+                conversationHistory.pop();
+                return;
+              }
+            } catch (err) {
+              console.warn("Failed to parse SSE payload:", err);
+            }
           }
-        } catch {
-          // Fallback if response isn't JSON
         }
 
-        showErrorBanner(errorMessage);
-        appendMessage("assistant", errorMessage, true);
-        conversationHistory.pop();
-        return;
-      }
+        removeLoadingIndicator();
 
-      const data = await response.json();
-      if (data && typeof data.reply === "string") {
-        appendMessage("assistant", data.reply);
-        conversationHistory.push({ role: "model", content: data.reply });
-
-        // Refresh workspace files after response in case files were touched
-        loadWorkspaceFiles();
+        if (finalReply) {
+          appendMessage("assistant", finalReply);
+          conversationHistory.push({ role: "model", content: finalReply });
+          loadWorkspaceFiles();
+        } else {
+          appendMessage("assistant", "The model completed the request without a response.");
+        }
       } else {
-        throw new Error("Received an unexpected response format from the server.");
+        // Fallback standard JSON response mode
+        removeLoadingIndicator();
+
+        if (!response.ok) {
+          let errorMessage = `Server error (${response.status})`;
+          try {
+            const errorData = await response.json();
+            if (errorData && errorData.detail) {
+              errorMessage = errorData.detail;
+            }
+          } catch {}
+
+          showErrorBanner(errorMessage);
+          appendMessage("assistant", errorMessage, true);
+          conversationHistory.pop();
+          return;
+        }
+
+        const data = await response.json();
+        if (data && typeof data.reply === "string") {
+          appendMessage("assistant", data.reply);
+          conversationHistory.push({ role: "model", content: data.reply });
+          loadWorkspaceFiles();
+        } else {
+          throw new Error("Received an unexpected response format from the server.");
+        }
       }
     } catch (error) {
       console.error("PyCraft request error:", error);
@@ -265,7 +330,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function openWorkspace() {
     workspacePanel.hidden = false;
-    // Force DOM reflow before adding transition class
     void workspacePanel.offsetWidth;
     workspacePanel.classList.add("is-open");
     workspaceBackdrop.hidden = false;

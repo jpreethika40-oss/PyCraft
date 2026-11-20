@@ -1,11 +1,13 @@
 import asyncio
+import json
 import logging
 import os
 from pathlib import Path
+from typing import AsyncGenerator
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import errors, types
@@ -16,6 +18,11 @@ from app.workspace import (
     list_workspace_files,
     read_workspace_file,
     write_workspace_file,
+)
+from app.agent import (
+    run_agent_loop,
+    execute_agent_tool,
+    check_user_overwrite_confirmation,
 )
 
 # Setup logging
@@ -42,8 +49,8 @@ FALLBACK_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flas
 
 app = FastAPI(
     title="PyCraft",
-    description="Your Personal AI Coding Agent - Backend Server with Restricted Workspace Tools",
-    version="0.4.0",
+    description="Your Personal AI Coding Agent - Backend Server with Autonomous Workspace Tools",
+    version="0.5.0",
 )
 
 # Mount the static directory for CSS, JavaScript, and assets
@@ -67,6 +74,8 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str = Field(..., description="Reply from PyCraft")
     status: str = Field(default="ok", description="Status indicator")
+    tools_used: list[str] = Field(default_factory=list, description="Tools called during response generation")
+    files_modified: bool = Field(default=False, description="Whether files were created or updated")
 
 
 class FileListResponse(BaseModel):
@@ -104,9 +113,9 @@ class FileWriteResponse(BaseModel):
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Provide a clean, readable error message for malformed payloads or missing fields."""
-    errors = exc.errors()
-    if errors:
-        first_err = errors[0]
+    errors_list = exc.errors()
+    if errors_list:
+        first_err = errors_list[0]
         field = first_err.get("loc", ["payload"])[-1]
         msg = first_err.get("msg", "Invalid field")
         detail = f"Invalid request payload for '{field}': {msg}"
@@ -319,20 +328,20 @@ async def write_file_alias_endpoint(payload: FileWriteRequest):
 
 
 # ---------------------------------------------------------------------------
-# Chat Endpoint (Phase 2)
+# Chat & Agent Endpoint (Phase 2 & Phase 5)
 # ---------------------------------------------------------------------------
 
-@app.post("/chat", response_model=ChatResponse, summary="Receive chat message and return Gemini AI reply")
-async def chat_endpoint(payload: ChatRequest):
+@app.post("/chat", response_model=ChatResponse, summary="Process chat message through Gemini agent loop")
+async def chat_endpoint(request: Request, payload: ChatRequest):
     """
-    Handle incoming chat messages and forward them to Google Gemini with conversation context.
+    Handle incoming chat messages through the PyCraft Gemini Agent Loop.
 
     Features:
-    - Validates message is non-empty.
-    - Dynamically reads GEMINI_API_KEY from environment or .env file.
-    - Passes prior session history to support contextual follow-ups.
-    - Supports all programming languages and general knowledge questions.
-    - Handles model fallbacks, rate limits, and timeouts with clear, safe error messages.
+    - Sends conversation and tool declarations to Gemini.
+    - Autonomous tool calling with strict Python allowlist (`list_workspace_files`, `read_workspace_file`, `write_workspace_file`).
+    - Enforces overwrite safety: asks for explicit confirmation before overwriting existing files.
+    - Supports Server-Sent Events (SSE) streaming for real-time activity updates ("Reading hello.txt...").
+    - Standard JSON response fallback for programmatic/test clients.
     """
     raw_message = payload.message
     cleaned_message = raw_message.strip()
@@ -359,7 +368,6 @@ async def chat_endpoint(payload: ChatRequest):
 
     # 3. Construct multi-turn contents list
     contents: list[types.Content] = []
-    # Take up to the last 20 conversation turns to preserve context without excessive tokens
     prior_turns = payload.history[-20:] if payload.history else []
     for turn in prior_turns:
         turn_text = turn.content.strip()
@@ -381,7 +389,7 @@ async def chat_endpoint(payload: ChatRequest):
         )
     )
 
-    # 4. Model candidates and configuration
+    # 4. Model candidates and client configuration
     configured_model = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL).strip()
     models_to_try = [configured_model] + [m for m in FALLBACK_MODELS if m != configured_model]
 
@@ -390,38 +398,84 @@ async def chat_endpoint(payload: ChatRequest):
         http_options=types.HttpOptions(timeout=60000),  # 60,000 ms = 60 seconds
     )
 
-    config = types.GenerateContentConfig(
-        system_instruction=(
-            "You are PyCraft, a helpful, intelligent AI assistant. "
-            "You answer general questions, reasoning queries, and coding requests across all programming languages "
-            "(including Python, Java, C, C++, JavaScript, TypeScript, HTML, CSS, SQL, Go, Rust, and more). "
-            "Provide accurate, clear explanations and well-structured code formatted in markdown code blocks."
-        )
-    )
+    # 5. Check client accept header for SSE streaming
+    accept_header = request.headers.get("accept", "")
+    wants_streaming = "text/event-stream" in accept_header
 
+    if wants_streaming:
+        async def event_stream() -> AsyncGenerator[str, None]:
+            queue: asyncio.Queue[str] = asyncio.Queue()
+
+            async def activity_callback(msg: str) -> None:
+                await queue.put(json.dumps({"type": "activity", "activity": msg}))
+
+            async def runner():
+                last_err = None
+                for model_name in models_to_try:
+                    try:
+                        reply, tools, modified = await run_agent_loop(
+                            client=client,
+                            model_name=model_name,
+                            contents=list(contents),
+                            user_prompt=cleaned_message,
+                            conversation_history=prior_turns,
+                            activity_callback=activity_callback,
+                        )
+                        await queue.put(
+                            json.dumps({
+                                "type": "done",
+                                "reply": reply,
+                                "status": "ok",
+                                "tools_used": tools,
+                                "files_modified": modified,
+                            })
+                        )
+                        return
+                    except Exception as exc:
+                        err_text = str(exc)
+                        if api_key in err_text:
+                            err_text = err_text.replace(api_key, "[REDACTED]")
+                        logger.warning(f"Model {model_name} failed in streaming agent loop: {err_text}")
+                        last_err = err_text
+                        continue
+
+                await queue.put(
+                    json.dumps({
+                        "type": "error",
+                        "detail": last_err or "Failed to generate a response from the AI model.",
+                    })
+                )
+
+            # Start runner task
+            task = asyncio.create_task(runner())
+
+            while not task.done() or not queue.empty():
+                try:
+                    msg = await asyncio.wait_for(queue.get(), timeout=0.2)
+                    yield f"data: {msg}\n\n"
+                except asyncio.TimeoutError:
+                    continue
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    # Non-streaming JSON response mode (Standard REST & Tests)
     last_error_detail = None
     last_status_code = status.HTTP_502_BAD_GATEWAY
 
     for model_name in models_to_try:
         try:
-            logger.info(f"Generating content using model: {model_name}")
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=model_name,
-                contents=contents,
-                config=config,
+            reply, tools_used, files_modified = await run_agent_loop(
+                client=client,
+                model_name=model_name,
+                contents=list(contents),
+                user_prompt=cleaned_message,
+                conversation_history=prior_turns,
             )
-
-            if response and response.text:
-                return ChatResponse(reply=response.text.strip(), status="ok")
-            elif response and response.candidates and response.candidates[0].content:
-                parts_text = "".join(p.text for p in response.candidates[0].content.parts if p.text)
-                if parts_text.strip():
-                    return ChatResponse(reply=parts_text.strip(), status="ok")
-
             return ChatResponse(
-                reply="The model returned an empty response. Please try rephrasing your message.",
+                reply=reply,
                 status="ok",
+                tools_used=tools_used,
+                files_modified=files_modified,
             )
 
         except (errors.APIError, errors.ClientError, errors.ServerError) as exc:

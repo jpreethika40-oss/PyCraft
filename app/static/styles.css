@@ -811,3 +811,17 @@ body {
   z-index: 40;
   backdrop-filter: blur(2px);
 }
+
+/* Loading Indicator Enhancement (Typing Dots & Tool Activity) */
+.loading-dots-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.loading-activity-text {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-left: 2px;
+}
