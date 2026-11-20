@@ -977,6 +977,23 @@ body {
   color: var(--text-muted);
 }
 
+.file-item-delete-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  opacity: 0.6;
+  transition: opacity 0.15s, background-color 0.15s, border-color 0.15s;
+}
+
+.file-item-delete-btn:hover {
+  opacity: 1;
+  background-color: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
 .workspace-empty-box {
   padding: 32px;
   text-align: center;
@@ -1021,6 +1038,49 @@ body {
 
 .viewer-nav-btn:hover {
   background-color: var(--border-subtle);
+}
+
+.viewer-nav-btn.danger-nav-btn {
+  color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.viewer-nav-btn.danger-nav-btn:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+}
+
+/* Inline Chat Action Buttons for Confirmations */
+.chat-action-group {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.chat-action-btn {
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border-subtle);
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  transition: background-color 0.15s, border-color 0.15s;
+}
+
+.chat-action-btn:hover {
+  background-color: var(--border-subtle);
+}
+
+.chat-action-btn.danger {
+  background-color: #ef4444;
+  color: #ffffff;
+  border-color: #ef4444;
+}
+
+.chat-action-btn.danger:hover {
+  background-color: #dc2626;
 }
 
 .viewer-file-meta {

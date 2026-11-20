@@ -18,11 +18,13 @@ from app.workspace import (
     list_workspace_files,
     read_workspace_file,
     write_workspace_file,
+    delete_workspace_file,
 )
 from app.agent import (
     run_agent_loop,
     execute_agent_tool,
     check_user_overwrite_confirmation,
+    check_user_delete_confirmation,
 )
 
 # Setup logging
@@ -77,6 +79,8 @@ class ChatResponse(BaseModel):
     tools_used: list[str] = Field(default_factory=list, description="Tools called during response generation")
     files_modified: bool = Field(default=False, description="Whether files were created or updated")
     modified_files: list[str] = Field(default_factory=list, description="Workspace-relative paths of modified files")
+    files_deleted: bool = Field(default=False, description="Whether files were deleted")
+    deleted_files: list[str] = Field(default_factory=list, description="Workspace-relative paths of deleted files")
 
 
 class FileListResponse(BaseModel):
@@ -104,6 +108,16 @@ class FileWriteResponse(BaseModel):
     path: str = Field(..., description="Workspace-relative path of the file")
     operation: str = Field(..., description="Operation performed: 'created' or 'updated'")
     bytes_written: int = Field(..., description="Number of bytes written to disk")
+    status: str = Field(default="ok", description="Status indicator")
+
+
+class FileDeleteRequest(BaseModel):
+    path: str = Field(..., description="Workspace-relative path to the file to delete")
+
+
+class FileDeleteResponse(BaseModel):
+    path: str = Field(..., description="Workspace-relative path of the deleted file")
+    deleted: bool = Field(default=True, description="Whether the file was successfully deleted")
     status: str = Field(default="ok", description="Status indicator")
 
 
@@ -248,6 +262,39 @@ def _execute_write_file(payload: FileWriteRequest) -> FileWriteResponse:
         )
 
 
+def _execute_delete_file(path_str: str) -> FileDeleteResponse:
+    """Helper to delete workspace file and map domain exceptions to HTTP status codes."""
+    try:
+        rel_path, deleted = delete_workspace_file(path_str, workspace_root=get_workspace_root())
+        return FileDeleteResponse(path=rel_path, deleted=deleted, status="ok")
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+    except PermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        )
+    except IsADirectoryError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        logger.error(f"Unexpected error deleting workspace file '{path_str}': {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred while deleting the workspace file.",
+        )
+
+
 @app.get(
     "/workspace/files",
     response_model=FileListResponse,
@@ -327,6 +374,37 @@ async def write_file_post_endpoint(payload: FileWriteRequest):
 async def write_file_alias_endpoint(payload: FileWriteRequest):
     """Alias for POST /workspace/write."""
     return _execute_write_file(payload)
+
+
+@app.post(
+    "/workspace/delete",
+    response_model=FileDeleteResponse,
+    summary="Delete a single workspace file",
+    tags=["workspace"],
+)
+async def delete_file_post_endpoint(payload: FileDeleteRequest):
+    """
+    Safely delete a single regular file within the workspace.
+    - Requires a workspace-relative path.
+    - Rejects traversal ('..'), absolute paths, directory deletion, and excluded/sensitive files.
+    - If file does not exist, returns 404 Not Found.
+    """
+    return _execute_delete_file(payload.path)
+
+
+@app.delete(
+    "/workspace/file",
+    response_model=FileDeleteResponse,
+    summary="Delete a single workspace file (DELETE method)",
+    tags=["workspace"],
+)
+async def delete_file_endpoint(
+    path: str = Query(..., description="Workspace-relative path to the file to delete")
+):
+    """
+    Safely delete a single regular file within the workspace via query parameter.
+    """
+    return _execute_delete_file(path)
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +493,7 @@ async def chat_endpoint(request: Request, payload: ChatRequest):
                 last_err = None
                 for model_name in models_to_try:
                     try:
-                        reply, tools, modified, modified_paths = await run_agent_loop(
+                        loop_res = await run_agent_loop(
                             client=client,
                             model_name=model_name,
                             contents=list(contents),
@@ -423,6 +501,13 @@ async def chat_endpoint(request: Request, payload: ChatRequest):
                             conversation_history=prior_turns,
                             activity_callback=activity_callback,
                         )
+                        reply, tools, modified, modified_paths = loop_res
+                        files_deleted = getattr(loop_res, "files_deleted", False)
+                        deleted_files = getattr(loop_res, "deleted_files", [])
+                        if not files_deleted and "delete_workspace_file" in tools and modified:
+                            files_deleted = True
+                            deleted_files = list(modified_paths)
+
                         await queue.put(
                             json.dumps({
                                 "type": "done",
@@ -431,6 +516,8 @@ async def chat_endpoint(request: Request, payload: ChatRequest):
                                 "tools_used": tools,
                                 "files_modified": modified,
                                 "modified_files": modified_paths,
+                                "files_deleted": files_deleted,
+                                "deleted_files": deleted_files,
                             })
                         )
                         return
@@ -467,19 +554,28 @@ async def chat_endpoint(request: Request, payload: ChatRequest):
 
     for model_name in models_to_try:
         try:
-            reply, tools_used, files_modified, modified_paths = await run_agent_loop(
+            loop_res = await run_agent_loop(
                 client=client,
                 model_name=model_name,
                 contents=list(contents),
                 user_prompt=cleaned_message,
                 conversation_history=prior_turns,
             )
+            reply, tools_used, files_modified, modified_paths = loop_res
+            files_deleted = getattr(loop_res, "files_deleted", False)
+            deleted_files = getattr(loop_res, "deleted_files", [])
+            if not files_deleted and "delete_workspace_file" in tools_used and files_modified:
+                files_deleted = True
+                deleted_files = list(modified_paths)
+
             return ChatResponse(
                 reply=reply,
                 status="ok",
                 tools_used=tools_used,
                 files_modified=files_modified,
                 modified_files=modified_paths,
+                files_deleted=files_deleted,
+                deleted_files=deleted_files,
             )
 
         except (errors.APIError, errors.ClientError, errors.ServerError) as exc:

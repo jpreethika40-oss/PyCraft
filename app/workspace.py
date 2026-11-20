@@ -142,6 +142,7 @@ def validate_and_resolve_path(
     rel_path_str: str,
     workspace_root: Optional[Path] = None,
     for_write: bool = False,
+    for_delete: bool = False,
 ) -> Path:
     """
     Validate a workspace-relative path string and resolve it to an absolute Path.
@@ -153,13 +154,14 @@ def validate_and_resolve_path(
     - Rejects '..' directory traversal.
     - Rejects hidden and excluded files/directories.
     - Resolves symlinks and enforces strict workspace containment.
-    - If for_write=False: validates target exists and is a regular file.
+    - If for_write=False, for_delete=False: validates target exists and is a regular file.
     - If for_write=True: validates target directory/file stays inside workspace and is not an existing directory.
+    - If for_delete=True: validates target exists, is a regular file, and is not excluded/sensitive.
 
     Raises:
         ValueError: For invalid path formats, traversals, or empty strings.
         PermissionError: If path escapes the workspace root boundary or targets excluded/sensitive files.
-        FileNotFoundError: If the target does not exist (read mode) or is excluded.
+        FileNotFoundError: If the target does not exist (read/delete mode) or is excluded.
         IsADirectoryError: If the resolved path points to a directory.
     """
     if workspace_root is None:
@@ -199,6 +201,8 @@ def validate_and_resolve_path(
     if is_path_excluded(rel_path):
         if for_write:
             raise PermissionError("Writing to excluded or sensitive paths is not permitted.")
+        elif for_delete:
+            raise PermissionError("Deleting excluded or sensitive paths is not permitted.")
         else:
             raise FileNotFoundError("The requested file is excluded or cannot be accessed.")
 
@@ -223,6 +227,8 @@ def validate_and_resolve_path(
     if is_path_excluded(rel_resolved):
         if for_write:
             raise PermissionError("Writing to excluded or sensitive paths is not permitted.")
+        elif for_delete:
+            raise PermissionError("Deleting excluded or sensitive paths is not permitted.")
         else:
             raise FileNotFoundError("The requested file is excluded or cannot be accessed.")
 
@@ -230,6 +236,16 @@ def validate_and_resolve_path(
         # For writing: target cannot be an existing directory
         if resolved_path.exists() and resolved_path.is_dir():
             raise IsADirectoryError(f"Path '{clean_str}' is a directory, not a regular file.")
+    elif for_delete:
+        # For deleting: target must exist and be a regular file
+        if not resolved_path.exists():
+            raise FileNotFoundError(f"File not found: '{clean_str}'")
+
+        if resolved_path.is_dir():
+            raise IsADirectoryError(f"Path '{clean_str}' is a directory, not a regular file.")
+
+        if not resolved_path.is_file():
+            raise ValueError(f"Path '{clean_str}' is not a regular file.")
     else:
         # For reading: target must exist and be a regular file
         if not resolved_path.exists():
@@ -454,3 +470,45 @@ def write_workspace_file(
         raise
 
     return rel_display_path, operation, file_size
+
+
+def delete_workspace_file(
+    rel_path_str: str,
+    workspace_root: Optional[Path] = None,
+) -> tuple[str, bool]:
+    """
+    Safely delete a single regular file inside the configured workspace.
+
+    Safeguards:
+    - Strictly contained inside workspace root; traversal, absolute paths, and escapes are rejected.
+    - Excluded and sensitive files (.env, .git, credentials, secrets) cannot be deleted.
+    - Target must exist and be a regular file; directories cannot be deleted.
+    - Deletes exactly one file; no bulk deletion or recycling.
+
+    Args:
+        rel_path_str: Workspace-relative path to the file to delete.
+        workspace_root: Optional explicit workspace root path.
+
+    Returns:
+        Tuple of (clean_relative_path, True).
+
+    Raises:
+        FileNotFoundError: If the file does not exist.
+        PermissionError: If path resolves outside workspace or targets excluded/sensitive file.
+        IsADirectoryError: If target path is a directory.
+        ValueError: For invalid path syntax, traversal, or non-regular files.
+    """
+    if workspace_root is None:
+        workspace_root = get_workspace_root()
+
+    resolved_path = validate_and_resolve_path(rel_path_str, workspace_root, for_delete=True)
+    resolved_root = workspace_root.resolve()
+    rel_display_path = resolved_path.relative_to(resolved_root).as_posix()
+
+    try:
+        resolved_path.unlink()
+    except OSError as exc:
+        raise ValueError(f"Failed to delete file '{rel_display_path}': {exc}") from exc
+
+    return rel_display_path, True
+

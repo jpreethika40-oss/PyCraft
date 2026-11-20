@@ -40,9 +40,9 @@ class AgentToolDeclarationTests(unittest.TestCase):
 
     def test_tool_declarations_content_and_names(self):
         decls = get_tool_declarations()
-        self.assertEqual(len(decls), 3)
+        self.assertEqual(len(decls), 4)
         names = {d.name for d in decls}
-        self.assertEqual(names, {"list_workspace_files", "read_workspace_file", "write_workspace_file"})
+        self.assertEqual(names, {"list_workspace_files", "read_workspace_file", "write_workspace_file", "delete_workspace_file"})
 
     def test_tool_declarations_parameters(self):
         decls = {d.name: d for d in get_tool_declarations()}
@@ -63,6 +63,11 @@ class AgentToolDeclarationTests(unittest.TestCase):
         self.assertIn("overwrite", write_decl.parameters.properties)
         self.assertIn("path", write_decl.parameters.required)
         self.assertIn("content", write_decl.parameters.required)
+
+        # delete_workspace_file requires path
+        del_decl = decls["delete_workspace_file"]
+        self.assertIn("path", del_decl.parameters.properties)
+        self.assertIn("path", del_decl.parameters.required)
 
 
 class AgentActivityDescriptionTests(unittest.TestCase):

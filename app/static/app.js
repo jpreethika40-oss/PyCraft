@@ -436,6 +436,39 @@ document.addEventListener("DOMContentLoaded", () => {
     bubble.className = "message-bubble";
     bubble.textContent = text; // Safe text rendering
 
+    // Check if the assistant message is prompting to delete a file
+    if (role === "assistant" && !isError) {
+      const deleteMatch = text.match(/delete\s+[`"']?([a-zA-Z0-9_\-\.\/]+)[`"']?\s*\?\s*this cannot be undone/i);
+      if (deleteMatch && deleteMatch[1]) {
+        const targetFile = deleteMatch[1];
+        const actionGroup = document.createElement("div");
+        actionGroup.className = "chat-action-group";
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "chat-action-btn danger";
+        deleteBtn.textContent = `Delete ${targetFile}`;
+        deleteBtn.addEventListener("click", () => {
+          confirmDeleteFile(targetFile);
+        });
+
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "chat-action-btn";
+        cancelBtn.textContent = "Cancel";
+        cancelBtn.addEventListener("click", () => {
+          if (!isSendingMessage) {
+            messageInput.value = `No, cancel deletion of ${targetFile}.`;
+            chatForm.dispatchEvent(new Event("submit", { cancelable: true }));
+          }
+        });
+
+        actionGroup.appendChild(deleteBtn);
+        actionGroup.appendChild(cancelBtn);
+        bubble.appendChild(actionGroup);
+      }
+    }
+
     messageRow.appendChild(bubble);
     messagesList.appendChild(messageRow);
   }
@@ -870,9 +903,21 @@ document.addEventListener("DOMContentLoaded", () => {
           actionSpan.className = "file-item-action";
           actionSpan.textContent = "Click to view &rarr;";
 
+          const deleteBtn = document.createElement("button");
+          deleteBtn.type = "button";
+          deleteBtn.className = "file-item-delete-btn";
+          deleteBtn.setAttribute("aria-label", `Delete ${filePath}`);
+          deleteBtn.setAttribute("title", `Delete ${filePath}`);
+          deleteBtn.textContent = "🗑️";
+          deleteBtn.addEventListener("click", (e) => {
+            e.stopPropagation();
+            confirmDeleteFile(filePath);
+          });
+
           li.appendChild(iconSpan);
           li.appendChild(nameSpan);
           li.appendChild(actionSpan);
+          li.appendChild(deleteBtn);
 
           li.addEventListener("click", () => viewWorkspaceFile(filePath));
           li.addEventListener("keydown", (e) => {
@@ -965,6 +1010,67 @@ document.addEventListener("DOMContentLoaded", () => {
   if (viewerCloseBtn) viewerCloseBtn.addEventListener("click", showChatView);
   if (workspaceRefreshBtn) workspaceRefreshBtn.addEventListener("click", loadWorkspaceFiles);
   if (workspaceRetryBtn) workspaceRetryBtn.addEventListener("click", loadWorkspaceFiles);
+
+  const viewerDeleteBtn = document.getElementById("viewer-delete-btn");
+  if (viewerDeleteBtn) {
+    viewerDeleteBtn.addEventListener("click", () => {
+      if (currentSelectedFile) {
+        confirmDeleteFile(currentSelectedFile);
+      }
+    });
+  }
+
+  function confirmDeleteFile(filePath) {
+    if (!filePath) return;
+    showModal({
+      title: "Delete file?",
+      bodyHtml: `<p>Delete <code>${escapeHtml(filePath)}</code>? This cannot be undone.</p>`,
+      confirmText: "Delete file",
+      cancelText: "Cancel",
+      confirmVariant: "danger",
+      showCancel: true,
+      onConfirm: async () => {
+        await executeDeleteWorkspaceFile(filePath);
+      },
+    });
+  }
+
+  async function executeDeleteWorkspaceFile(filePath) {
+    try {
+      const response = await fetch("/workspace/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: JSON.stringify({ path: filePath }),
+      });
+
+      if (!response.ok) {
+        let errDetail = `Failed to delete file (${response.status})`;
+        try {
+          const errData = await response.json();
+          if (errData && errData.detail) errDetail = errData.detail;
+        } catch { }
+        throw new Error(errDetail);
+      }
+
+      const data = await response.json();
+      const deletedPath = data.path || filePath;
+
+      // Close preview if the deleted file was open
+      if (currentSelectedFile === deletedPath || currentSelectedFile === filePath) {
+        backToFileListView();
+      }
+
+      // Refresh workspace list
+      await loadWorkspaceFiles();
+      showNotification(`Deleted '${deletedPath}'.`);
+    } catch (err) {
+      console.error("Delete workspace file error:", err);
+      showNotification(err.message || "Failed to delete file.");
+    }
+  }
 
   // -------------------------------------------------------------------------
   // Chat Messaging & Agent Tool Calling
@@ -1134,7 +1240,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 updateLoadingActivity(eventData.activity);
               } else if (eventData.type === "done") {
                 finalReply = eventData.reply;
-                if (eventData.files_modified) filesModified = true;
+                if (eventData.files_modified || eventData.files_deleted) filesModified = true;
+                if (eventData.files_deleted && Array.isArray(eventData.deleted_files)) {
+                  if (eventData.deleted_files.includes(currentSelectedFile)) {
+                    backToFileListView();
+                  }
+                }
               } else if (eventData.type === "error") {
                 removeLoadingIndicator();
                 showNotification(eventData.detail);
@@ -1187,7 +1298,13 @@ document.addEventListener("DOMContentLoaded", () => {
           appendMessageToDOM("assistant", data.reply);
           saveChatsToStorage();
 
-          if (data.files_modified) {
+          if (data.files_deleted && Array.isArray(data.deleted_files)) {
+            if (data.deleted_files.includes(currentSelectedFile)) {
+              backToFileListView();
+            }
+          }
+
+          if (data.files_modified || data.files_deleted) {
             loadWorkspaceFiles();
           }
         } else {
@@ -1266,6 +1383,10 @@ document.addEventListener("DOMContentLoaded", () => {
     showChatView,
     loadWorkspaceFiles,
     viewWorkspaceFile,
+    backToFileListView,
+    getCurrentSelectedFile: () => currentSelectedFile,
+    confirmDeleteFile,
+    executeDeleteWorkspaceFile,
     openMenu,
     closeAllDropdowns,
     toggleMenu,
