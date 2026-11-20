@@ -248,7 +248,7 @@ class AgentLoopExecutionTests(unittest.IsolatedAsyncioTestCase):
         mock_client.models.generate_content.return_value = mock_response
 
         contents = [types.Content(role="user", parts=[types.Part.from_text(text="Hi")])]
-        reply, tools, modified = await run_agent_loop(
+        reply, tools, modified, modified_paths = await run_agent_loop(
             client=mock_client,
             model_name="gemini-3.5-flash-lite",
             contents=contents,
@@ -259,6 +259,7 @@ class AgentLoopExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply, "Hello! I am PyCraft. How can I assist you today?")
         self.assertEqual(tools, [])
         self.assertFalse(modified)
+        self.assertEqual(modified_paths, [])
 
     async def test_agent_loop_single_tool_call_flow(self):
         # Turn 1: Gemini calls list_workspace_files
@@ -296,7 +297,7 @@ class AgentLoopExecutionTests(unittest.IsolatedAsyncioTestCase):
             activities.append(act)
 
         contents = [types.Content(role="user", parts=[types.Part.from_text(text="What files do I have?")])]
-        reply, tools, modified = await run_agent_loop(
+        reply, tools, modified, modified_paths = await run_agent_loop(
             client=mock_client,
             model_name="gemini-3.5-flash-lite",
             contents=contents,
@@ -308,6 +309,7 @@ class AgentLoopExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply, "You have 1 file: hello.txt")
         self.assertEqual(tools, ["list_workspace_files"])
         self.assertFalse(modified)
+        self.assertEqual(modified_paths, [])
         self.assertEqual(activities, ["Listing workspace files..."])
 
     async def test_agent_loop_write_tool_sets_modified_flag(self):
@@ -340,7 +342,7 @@ class AgentLoopExecutionTests(unittest.IsolatedAsyncioTestCase):
         mock_client.models.generate_content.side_effect = [resp1, resp2]
 
         contents = [types.Content(role="user", parts=[types.Part.from_text(text="Create result.txt")])]
-        reply, tools, modified = await run_agent_loop(
+        reply, tools, modified, modified_paths = await run_agent_loop(
             client=mock_client,
             model_name="gemini-3.5-flash-lite",
             contents=contents,
@@ -350,6 +352,7 @@ class AgentLoopExecutionTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(tools, ["write_workspace_file"])
         self.assertTrue(modified)
+        self.assertEqual(modified_paths, ["result.txt"])
         self.assertTrue((self.ws_root / "result.txt").exists())
 
     async def test_agent_loop_max_iterations_safety_guard(self):
@@ -374,7 +377,7 @@ class AgentLoopExecutionTests(unittest.IsolatedAsyncioTestCase):
         mock_client.models.generate_content.return_value = resp
 
         contents = [types.Content(role="user", parts=[types.Part.from_text(text="Loop forever")])]
-        reply, tools, modified = await run_agent_loop(
+        reply, tools, modified, modified_paths = await run_agent_loop(
             client=mock_client,
             model_name="gemini-3.5-flash-lite",
             contents=contents,
@@ -411,7 +414,7 @@ class ChatEndpointPhase5Tests(unittest.TestCase):
     @patch("app.main.genai.Client")
     def test_chat_json_response_format(self, mock_client_cls, mock_agent_loop):
         # Configure mock return for agent loop
-        mock_agent_loop.return_value = ("Here is your answer.", ["list_workspace_files"], False)
+        mock_agent_loop.return_value = ("Here is your answer.", ["list_workspace_files"], False, [])
 
         with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key-12345"}):
             response = self.client.post(
@@ -425,6 +428,7 @@ class ChatEndpointPhase5Tests(unittest.TestCase):
         self.assertEqual(data["status"], "ok")
         self.assertEqual(data["tools_used"], ["list_workspace_files"])
         self.assertFalse(data["files_modified"])
+        self.assertEqual(data["modified_files"], [])
 
     @patch("app.main.run_agent_loop")
     @patch("app.main.genai.Client")
@@ -434,7 +438,7 @@ class ChatEndpointPhase5Tests(unittest.TestCase):
             cb = kwargs.get("activity_callback")
             if cb:
                 await cb("Listing workspace files...")
-            return ("All done!", ["list_workspace_files"], False)
+            return ("All done!", ["list_workspace_files"], False, [])
 
         mock_agent_loop.side_effect = fake_loop
 

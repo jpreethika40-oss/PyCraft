@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,23 +7,106 @@
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <div class="chat-app">
-    <!-- Header: Clean text-only PyCraft wordmark and navigation -->
-    <header class="chat-header">
-      <div class="header-inner">
+  <div class="app-container">
+    <!-- Top Application Menu Bar -->
+    <header class="app-header">
+      <div class="header-left">
+        <!-- ☰ Sidebar Menu Button -->
+        <button type="button" id="sidebar-toggle-btn" class="icon-nav-btn" title="Toggle Sidebar (Chats & Workspace)" aria-label="Toggle Sidebar" aria-expanded="false">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden="true">
+            <path fill-rule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/>
+          </svg>
+        </button>
+
         <h1 class="brand-title">PyCraft</h1>
-        <div class="header-actions">
-          <button type="button" id="workspace-toggle-btn" class="header-btn" title="View Workspace Files" aria-label="Toggle Workspace Files" aria-expanded="false">
-            <svg class="header-icon" viewBox="0 0 20 20" fill="currentColor" width="15" height="15" aria-hidden="true">
-              <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
-            </svg>
-            <span>Workspace</span>
-            <span id="workspace-badge" class="workspace-badge" hidden>0</span>
-          </button>
-          <button type="button" id="new-chat-btn" class="header-btn" title="Start a fresh conversation" aria-label="New Chat">
-            New Chat
-          </button>
-        </div>
+
+        <!-- Desktop Menu Bar -->
+        <nav class="app-menu-nav" aria-label="Application Menu">
+          <ul class="menu-bar-list" role="menubar">
+            <!-- File Menu -->
+            <li class="menu-item" role="none">
+              <button type="button" class="menu-trigger-btn" id="menu-file-trigger" role="menuitem" aria-haspopup="true" aria-expanded="false">
+                File
+              </button>
+              <div class="dropdown-menu" id="menu-file-dropdown" role="menu" aria-labelledby="menu-file-trigger" hidden>
+                <button type="button" class="dropdown-action-btn" id="action-file-new-chat" role="menuitem">
+                  <span class="action-icon">➕</span> New Chat
+                </button>
+                <button type="button" class="dropdown-action-btn" id="action-file-open-workspace" role="menuitem">
+                  <span class="action-icon">📁</span> Open Workspace
+                </button>
+              </div>
+            </li>
+
+            <!-- Edit Menu -->
+            <li class="menu-item" role="none">
+              <button type="button" class="menu-trigger-btn" id="menu-edit-trigger" role="menuitem" aria-haspopup="true" aria-expanded="false">
+                Edit
+              </button>
+              <div class="dropdown-menu" id="menu-edit-dropdown" role="menu" aria-labelledby="menu-edit-trigger" hidden>
+                <button type="button" class="dropdown-action-btn" id="action-edit-copy-response" role="menuitem">
+                  <span class="action-icon">📋</span> Copy Last Response
+                </button>
+                <div class="menu-divider" role="separator"></div>
+                <button type="button" class="dropdown-action-btn danger-action" id="action-edit-clear-chat" role="menuitem">
+                  <span class="action-icon">🧹</span> Clear Current Chat...
+                </button>
+              </div>
+            </li>
+
+            <!-- View Menu -->
+            <li class="menu-item" role="none">
+              <button type="button" class="menu-trigger-btn" id="menu-view-trigger" role="menuitem" aria-haspopup="true" aria-expanded="false">
+                View
+              </button>
+              <div class="dropdown-menu" id="menu-view-dropdown" role="menu" aria-labelledby="menu-view-trigger" hidden>
+                <button type="button" class="dropdown-action-btn" id="action-view-toggle-sidebar" role="menuitem">
+                  <span class="action-icon">☰</span> Show / Hide Sidebar
+                </button>
+                <button type="button" class="dropdown-action-btn" id="action-view-show-workspace" role="menuitem">
+                  <span class="action-icon">📁</span> Show Workspace
+                </button>
+                <div class="menu-divider" role="separator"></div>
+                <button type="button" class="dropdown-action-btn" id="action-view-dark-theme" role="menuitem">
+                  <span class="action-icon">🌙</span> Dark Theme
+                </button>
+                <button type="button" class="dropdown-action-btn" id="action-view-light-theme" role="menuitem">
+                  <span class="action-icon">☀️</span> Light Theme
+                </button>
+              </div>
+            </li>
+
+            <!-- Help Menu -->
+            <li class="menu-item" role="none">
+              <button type="button" class="menu-trigger-btn" id="menu-help-trigger" role="menuitem" aria-haspopup="true" aria-expanded="false">
+                Help
+              </button>
+              <div class="dropdown-menu" id="menu-help-dropdown" role="menu" aria-labelledby="menu-help-trigger" hidden>
+                <button type="button" class="dropdown-action-btn" id="action-help-how-to" role="menuitem">
+                  <span class="action-icon">💡</span> How to use PyCraft
+                </button>
+                <button type="button" class="dropdown-action-btn" id="action-help-about" role="menuitem">
+                  <span class="action-icon">ℹ️</span> About PyCraft
+                </button>
+              </div>
+            </li>
+          </ul>
+        </nav>
+      </div>
+
+      <!-- Header Right: Chat Title & Theme Switch -->
+      <div class="header-right">
+        <span id="active-chat-title-badge" class="active-chat-title-badge" title="Active conversation">New Chat</span>
+
+        <!-- Theme Toggle Switch Button -->
+        <button type="button" id="theme-toggle-btn" class="icon-nav-btn" title="Switch Theme (Dark / Light)" aria-label="Toggle Dark and Light theme">
+          <span id="theme-icon" aria-hidden="true">☀️</span>
+        </button>
+
+        <!-- New Chat Quick Action -->
+        <button type="button" id="header-new-chat-btn" class="header-action-btn" title="Start a fresh conversation" aria-label="New Chat">
+          + New Chat
+        </button>
       </div>
     </header>
 
@@ -33,128 +116,202 @@
       <button type="button" id="dismiss-error-btn" class="dismiss-btn" aria-label="Dismiss error">&times;</button>
     </div>
 
-    <!-- Main Content Area -->
-    <main id="chat-main" class="chat-main">
-      <!-- Welcome Empty State (shown before first message) -->
-      <div id="empty-state" class="empty-state">
-        <h2 class="empty-title">How can I help you today?</h2>
-        <p class="empty-desc">Ask anything &mdash; from coding and debugging to concepts, comparisons, and general knowledge.</p>
-        <div class="suggestions-grid">
-          <button type="button" class="suggestion-card" data-prompt="Explain the difference between a process and a thread.">
-            <span class="suggestion-topic">Concepts</span>
-            <span class="suggestion-text">Process vs. thread explanation</span>
-          </button>
-          <button type="button" class="suggestion-card" data-prompt="Write a Python function to check for balanced brackets in an expression.">
-            <span class="suggestion-topic">Python</span>
-            <span class="suggestion-text">Check for balanced brackets</span>
-          </button>
-          <button type="button" class="suggestion-card" data-prompt="Write a Java method to reverse a singly linked list.">
-            <span class="suggestion-topic">Java</span>
-            <span class="suggestion-text">Reverse a singly linked list</span>
-          </button>
-          <button type="button" class="suggestion-card" data-prompt="How do database indexes speed up SQL queries?">
-            <span class="suggestion-topic">SQL</span>
-            <span class="suggestion-text">How indexes optimize queries</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Messages Conversation Container -->
-      <div id="messages-container" class="messages-container" aria-live="polite">
-        <div id="messages-list" class="messages-list"></div>
-      </div>
-    </main>
-
-    <!-- Message Composer Area -->
-    <footer class="chat-footer">
-      <form id="chat-form" class="chat-form">
-        <div class="composer-box">
-          <textarea
-            id="message-input"
-            class="message-input"
-            rows="1"
-            placeholder="Send a message..."
-            aria-label="Message input"
-            required
-          ></textarea>
-          <button type="submit" id="send-button" class="send-button" aria-label="Send message">
-            <svg class="send-icon" viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden="true">
-              <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/>
-            </svg>
-          </button>
-        </div>
-      </form>
-    </footer>
-
-    <!-- Workspace Panel (Collapsible Drawer) -->
-    <aside id="workspace-panel" class="workspace-panel" aria-label="Workspace Files" hidden>
-      <div class="workspace-header">
-        <div class="workspace-title-group">
-          <svg class="workspace-folder-icon" viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden="true">
-            <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
-          </svg>
-          <h2 class="workspace-title">Workspace Files</h2>
-        </div>
-        <div class="workspace-header-actions">
-          <button type="button" id="workspace-refresh-btn" class="icon-btn" title="Refresh files" aria-label="Refresh workspace files">
-            <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
-              <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.099a1 1 0 01.762 1.185A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.608-1.234z" clip-rule="evenodd"/>
-            </svg>
-          </button>
-          <button type="button" id="workspace-close-btn" class="icon-btn close-btn" title="Close workspace panel" aria-label="Close workspace panel">
-            &times;
-          </button>
-        </div>
-      </div>
-
-      <div class="workspace-body">
-        <!-- Loading State -->
-        <div id="workspace-loading" class="workspace-state" hidden>
-          <div class="loading-spinner"></div>
-          <span>Loading files...</span>
-        </div>
-
-        <!-- Error State -->
-        <div id="workspace-error" class="workspace-state workspace-error-state" hidden>
-          <span id="workspace-error-text" class="workspace-error-text"></span>
-          <button type="button" id="workspace-retry-btn" class="workspace-retry-btn">Retry</button>
-        </div>
-
-        <!-- File List View -->
-        <div id="workspace-list-view" class="workspace-list-view">
-          <ul id="workspace-file-list" class="workspace-file-list" role="list"></ul>
-          <div id="workspace-empty" class="workspace-empty" hidden>
-            <p>No accessible files in workspace.</p>
+    <!-- Main Workspace & Chat Layout -->
+    <div class="app-body">
+      <!-- Collapsible Sidebar (Closed by default) -->
+      <aside id="app-sidebar" class="app-sidebar" aria-label="Saved Chats and Workspace" hidden>
+        <div class="sidebar-header">
+          <div class="sidebar-title-group">
+            <h2 class="sidebar-heading">Conversations</h2>
+          </div>
+          <div class="sidebar-header-actions">
+            <button type="button" id="sidebar-new-chat-btn" class="sidebar-action-btn" title="Create new chat" aria-label="New Chat">
+              + New
+            </button>
+            <button type="button" id="sidebar-close-btn" class="sidebar-close-btn" title="Close sidebar" aria-label="Close sidebar">
+              &times;
+            </button>
           </div>
         </div>
 
-        <!-- File Content Preview (Read-only) -->
-        <div id="workspace-viewer" class="workspace-viewer" hidden>
-          <div class="viewer-top-bar">
-            <button type="button" id="viewer-back-btn" class="viewer-back-btn" aria-label="Back to file list">
-              &larr; Back
-            </button>
-            <div class="viewer-file-meta">
-              <span id="viewer-file-path" class="viewer-file-path"></span>
-              <span id="viewer-file-size" class="viewer-file-size"></span>
+        <!-- Saved Chats List -->
+        <div class="sidebar-chats-container">
+          <ul id="saved-chats-list" class="saved-chats-list" role="list"></ul>
+          <div id="chats-empty-state" class="chats-empty-state" hidden>
+            <p>No saved chats yet.</p>
+          </div>
+        </div>
+
+        <!-- Sidebar Footer: Workspace & Theme Controls -->
+        <div class="sidebar-footer">
+          <button type="button" id="sidebar-workspace-btn" class="sidebar-footer-btn workspace-toggle-btn" title="Open Workspace file browser">
+            <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+              <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+            </svg>
+            <span class="footer-btn-label">Workspace Files</span>
+            <span id="sidebar-workspace-badge" class="sidebar-badge" hidden>0</span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- Sidebar Backdrop for Mobile/Narrow Viewports -->
+      <div id="sidebar-backdrop" class="sidebar-backdrop" hidden></div>
+
+      <!-- Main Stage Container (Expands to fill available window) -->
+      <div class="main-stage">
+        <!-- 1. Chat View (Primary View) -->
+        <section id="chat-view" class="chat-view" aria-label="Chat conversation">
+          <!-- Main Chat Scrollable Messages Area -->
+          <main id="chat-main" class="chat-main">
+            <!-- Empty State / Welcome (When conversation is new) -->
+            <div id="empty-state" class="empty-state">
+              <h2 class="empty-title">How can I help you today?</h2>
+              <p class="empty-desc">Ask anything &mdash; from coding and debugging to file operations, architecture, and general knowledge.</p>
+              <div class="suggestions-grid">
+                <button type="button" class="suggestion-card" data-prompt="What files are in my workspace?">
+                  <span class="suggestion-topic">Workspace</span>
+                  <span class="suggestion-text">List files in my workspace</span>
+                </button>
+                <button type="button" class="suggestion-card" data-prompt="Write a Python function to check for palindromes.">
+                  <span class="suggestion-topic">Python</span>
+                  <span class="suggestion-text">Palindrome checker function</span>
+                </button>
+                <button type="button" class="suggestion-card" data-prompt="Explain the difference between a process and a thread.">
+                  <span class="suggestion-topic">Concepts</span>
+                  <span class="suggestion-text">Process vs. thread comparison</span>
+                </button>
+                <button type="button" class="suggestion-card" data-prompt="How do database indexes speed up SQL queries?">
+                  <span class="suggestion-topic">SQL</span>
+                  <span class="suggestion-text">How indexes optimize queries</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Messages List -->
+            <div id="messages-container" class="messages-container" aria-live="polite">
+              <div id="messages-list" class="messages-list"></div>
+            </div>
+          </main>
+
+          <!-- Chat Message Composer Footer -->
+          <footer class="chat-footer">
+            <form id="chat-form" class="chat-form">
+              <div class="composer-box">
+                <textarea
+                  id="message-input"
+                  class="message-input"
+                  rows="1"
+                  placeholder="Send a message..."
+                  aria-label="Message input"
+                  required
+                ></textarea>
+                <button type="submit" id="send-button" class="send-button" aria-label="Send message">
+                  <svg class="send-icon" viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden="true">
+                    <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"/>
+                  </svg>
+                </button>
+              </div>
+            </form>
+          </footer>
+        </section>
+
+        <!-- 2. Workspace View (Opened only on demand via Sidebar or Menu) -->
+        <section id="workspace-view" class="workspace-view" aria-label="Workspace Browser" hidden>
+          <div id="workspace-panel" class="workspace-panel-container">
+            <!-- Workspace Panel Header -->
+            <div class="workspace-panel-header">
+              <div class="workspace-title-group">
+                <svg viewBox="0 0 20 20" fill="currentColor" width="18" height="18" aria-hidden="true">
+                  <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/>
+                </svg>
+                <h2 class="workspace-panel-title">Workspace Files</h2>
+                <span id="workspace-count-badge" class="workspace-count-badge">0 files</span>
+              </div>
+              <div class="workspace-header-actions">
+                <button type="button" id="workspace-refresh-btn" class="icon-nav-btn" title="Refresh files" aria-label="Refresh workspace files">
+                  <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.099a1 1 0 01.762 1.185A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.608-1.234z" clip-rule="evenodd"/>
+                  </svg>
+                </button>
+                <button type="button" id="workspace-close-btn" class="workspace-return-btn" title="Close workspace and return to chat" aria-label="Return to chat">
+                  &times; Close
+                </button>
+              </div>
+            </div>
+
+            <!-- Workspace Body: File List or File Preview -->
+            <div class="workspace-panel-body">
+              <!-- Loading State for File List -->
+              <div id="workspace-loading" class="workspace-status-box" hidden>
+                <div class="loading-spinner"></div>
+                <span>Loading workspace files...</span>
+              </div>
+
+              <!-- Error State for File List -->
+              <div id="workspace-error" class="workspace-status-box error-box" hidden>
+                <span id="workspace-error-text" class="status-error-text"></span>
+                <button type="button" id="workspace-retry-btn" class="status-action-btn">Retry</button>
+              </div>
+
+              <!-- 1. Workspace File List View -->
+              <div id="workspace-list-view" class="workspace-list-view">
+                <ul id="workspace-file-list" class="workspace-file-list" role="list"></ul>
+                <div id="workspace-empty" class="workspace-empty-box" hidden>
+                  <p>No accessible files found in workspace.</p>
+                </div>
+              </div>
+
+              <!-- 2. Workspace File Preview View -->
+              <div id="workspace-viewer" class="workspace-viewer-view" hidden>
+                <div class="viewer-top-bar">
+                  <div class="viewer-nav-actions">
+                    <button type="button" id="viewer-back-btn" class="viewer-nav-btn" aria-label="Back to file list">
+                      &larr; File List
+                    </button>
+                    <button type="button" id="viewer-close-btn" class="viewer-nav-btn" aria-label="Close preview and return to chat">
+                      &times; Close Preview
+                    </button>
+                  </div>
+                  <div class="viewer-file-meta">
+                    <span id="viewer-file-path" class="viewer-file-path"></span>
+                    <span id="viewer-file-size" class="viewer-file-size"></span>
+                  </div>
+                </div>
+
+                <!-- Viewer Specific Loading & Error States -->
+                <div id="viewer-loading" class="workspace-status-box" hidden>
+                  <div class="loading-spinner"></div>
+                  <span>Reading file contents...</span>
+                </div>
+                <div id="viewer-error" class="workspace-status-box error-box" hidden>
+                  <span id="viewer-error-text" class="status-error-text"></span>
+                </div>
+
+                <!-- Code Content Display -->
+                <div id="viewer-content-container" class="viewer-content-container">
+                  <pre class="viewer-pre"><code id="viewer-code" class="viewer-code"></code></pre>
+                </div>
+              </div>
             </div>
           </div>
-          <div id="viewer-loading" class="workspace-state" hidden>
-            <div class="loading-spinner"></div>
-            <span>Reading file...</span>
-          </div>
-          <div id="viewer-error" class="workspace-state workspace-error-state" hidden>
-            <span id="viewer-error-text" class="workspace-error-text"></span>
-          </div>
-          <div id="viewer-content-container" class="viewer-content-container">
-            <pre class="viewer-pre"><code id="viewer-code" class="viewer-code"></code></pre>
-          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Generic Accessible Modal Dialog (Used for Help, About, Confirmations, Renaming) -->
+    <div id="app-modal" class="modal-backdrop" hidden>
+      <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+        <div class="modal-header">
+          <h3 id="modal-title" class="modal-title">Modal Title</h3>
+          <button type="button" id="modal-close-btn" class="modal-close-btn" aria-label="Close dialog">&times;</button>
+        </div>
+        <div id="modal-body" class="modal-body"></div>
+        <div class="modal-footer" id="modal-footer">
+          <button type="button" id="modal-cancel-btn" class="modal-btn secondary-btn">Cancel</button>
+          <button type="button" id="modal-confirm-btn" class="modal-btn primary-btn">Confirm</button>
         </div>
       </div>
-    </aside>
-
-    <!-- Backdrop for mobile drawer -->
-    <div id="workspace-backdrop" class="workspace-backdrop" hidden></div>
+    </div>
   </div>
 
   <script src="/static/app.js"></script>

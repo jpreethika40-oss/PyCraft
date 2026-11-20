@@ -492,6 +492,64 @@ class WorkspaceToolTests(unittest.TestCase):
         self.assertEqual(new_file_res.status_code, 200)
         self.assertEqual(new_file_res.json()["content"], "print('hello from PyCraft agent')")
 
+    def test_create_list_and_read_palindrome_flow(self):
+        """Focused test: create palindrome.py, list files, and read exact contents."""
+        code = "def is_palindrome(s):\n    return s == s[::-1]\n"
+        write_res = self.client.post(
+            "/workspace/write",
+            json={"path": "palindrome.py", "content": code, "overwrite": False},
+        )
+        self.assertEqual(write_res.status_code, 200)
+        self.assertEqual(write_res.json()["path"], "palindrome.py")
+
+        # List files
+        list_res = self.client.get("/workspace/files")
+        self.assertEqual(list_res.status_code, 200)
+        self.assertIn("palindrome.py", list_res.json()["files"])
+
+        # Read file
+        read_res = self.client.get("/workspace/file", params={"path": "palindrome.py"})
+        self.assertEqual(read_res.status_code, 200)
+        self.assertEqual(read_res.json()["content"], code)
+        self.assertEqual(read_res.json()["path"], "palindrome.py")
+
+    def test_create_list_and_read_nested_relative_path(self):
+        """Focused test: create nested path utils/palindrome.py, list it, and read it."""
+        nested_code = "def check_palindrome():\n    return True\n"
+        write_res = self.client.post(
+            "/workspace/write",
+            json={"path": "utils/palindrome.py", "content": nested_code, "overwrite": False},
+        )
+        self.assertEqual(write_res.status_code, 200)
+        self.assertEqual(write_res.json()["path"], "utils/palindrome.py")
+
+        # List files
+        list_res = self.client.get("/workspace/files")
+        self.assertEqual(list_res.status_code, 200)
+        self.assertIn("utils/palindrome.py", list_res.json()["files"])
+
+        # Read nested file
+        read_res = self.client.get("/workspace/file", params={"path": "utils/palindrome.py"})
+        self.assertEqual(read_res.status_code, 200)
+        self.assertEqual(read_res.json()["content"], nested_code)
+        self.assertEqual(read_res.json()["path"], "utils/palindrome.py")
+
+    def test_redundant_workspace_prefix_normalized(self):
+        """Redundant leading 'workspace/' in relative path is normalized to prevent nested workspace folders."""
+        helper_code = "# helper functions\n"
+        write_res = self.client.post(
+            "/workspace/write",
+            json={"path": "workspace/helper.py", "content": helper_code, "overwrite": False},
+        )
+        self.assertEqual(write_res.status_code, 200)
+        # Should be normalized to helper.py, not workspace/workspace/helper.py
+        rel_path = write_res.json()["path"]
+        self.assertEqual(rel_path, "helper.py")
+
+        read_res = self.client.get("/workspace/file", params={"path": rel_path})
+        self.assertEqual(read_res.status_code, 200)
+        self.assertEqual(read_res.json()["content"], helper_code)
+
     # -----------------------------------------------------------------------
     # Chat Preservation Test
     # -----------------------------------------------------------------------

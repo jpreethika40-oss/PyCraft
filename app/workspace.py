@@ -178,11 +178,22 @@ def validate_and_resolve_path(
 
     # Reject '..' traversal anywhere in the path parts (handling both / and \)
     normalized_str = clean_str.replace("\\", "/")
-    parts = [p for p in normalized_str.split("/") if p]
-    rel_path = Path(clean_str)
-
-    if ".." in parts or ".." in rel_path.parts:
+    raw_parts = [p for p in normalized_str.split("/") if p]
+    if ".." in raw_parts or ".." in Path(clean_str).parts:
         raise ValueError("Path traversal ('..') is not permitted.")
+
+    # Strip any '.' parts (current directory references)
+    filtered_parts = [p for p in raw_parts if p != "."]
+    if not filtered_parts:
+        raise ValueError("File path cannot be empty.")
+
+    # If the relative path redundantly starts with the workspace folder's name (e.g. "workspace/file.py"),
+    # normalize it so writes and reads don't create or expect duplicate nested workspace directories
+    resolved_root = workspace_root.resolve()
+    if len(filtered_parts) > 1 and filtered_parts[0].lower() in ("workspace", resolved_root.name.lower()):
+        filtered_parts = filtered_parts[1:]
+
+    rel_path = Path(*filtered_parts)
 
     # Check for excluded path segments or filenames
     if is_path_excluded(rel_path):
@@ -419,6 +430,7 @@ def write_workspace_file(
     temp_file = tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
+        newline="",
         dir=parent_dir,
         delete=False,
         prefix=f".tmp_{resolved_path.name}_",

@@ -181,7 +181,8 @@ def execute_agent_tool(
         if not path or not isinstance(path, str):
             return {"error": "Invalid argument: 'path' must be a non-empty string."}
         try:
-            rel_path, content, size = read_workspace_file(path)
+            workspace_root = get_workspace_root()
+            rel_path, content, size = read_workspace_file(path, workspace_root=workspace_root)
             return {"path": rel_path, "content": content, "size": size}
         except Exception as exc:
             return {"error": str(exc)}
@@ -249,17 +250,18 @@ async def run_agent_loop(
     user_prompt: str,
     conversation_history: List[Any],
     activity_callback: Optional[Callable[[str], Coroutine[Any, Any, None]]] = None,
-) -> Tuple[str, List[str], bool]:
+) -> Tuple[str, List[str], bool, List[str]]:
     """
     Execute the multi-turn agent tool-calling loop with Google Gemini.
 
     Returns:
-        Tuple of (final_reply_text, tools_used_list, files_modified_bool)
+        Tuple of (final_reply_text, tools_used_list, files_modified_bool, modified_files_list)
     """
     import asyncio
 
     tools_used: List[str] = []
     files_modified: bool = False
+    modified_paths: List[str] = []
     iterations: int = 0
 
     tool_declarations = get_tool_declarations()
@@ -270,6 +272,7 @@ async def run_agent_loop(
             "You have tools to list files, read files, and write files in the workspace. "
             "When the user asks about project or workspace files, inspect them using your tools instead of guessing. "
             "Never claim you listed, read, created, or updated a file unless the tool succeeded. "
+            "If a write fails with an error or conflict, report the exact error to the user and do not claim the file was created or updated. "
             "If a write fails with a conflict because a file already exists, clearly tell the user which file exists "
             "and ask if they would like to overwrite it before proceeding."
         ),
@@ -305,7 +308,7 @@ async def run_agent_loop(
             if not final_reply.strip():
                 final_reply = "I completed the request, but returned an empty response. Please let me know if you need anything else."
 
-            return final_reply.strip(), tools_used, files_modified
+            return final_reply.strip(), tools_used, files_modified, modified_paths
 
         # Append model's tool call turn to contents
         model_content = response.candidates[0].content
@@ -334,6 +337,9 @@ async def run_agent_loop(
 
             if tool_name == "write_workspace_file" and tool_result.get("status") in ("success", "created", "updated"):
                 files_modified = True
+                written_path = tool_result.get("path")
+                if written_path and written_path not in modified_paths:
+                    modified_paths.append(written_path)
 
             tool_response_parts.append(
                 types.Part(
@@ -359,4 +365,5 @@ async def run_agent_loop(
         "I reached the maximum number of tool steps for this request. Please review the current workspace files or ask a more specific question.",
         tools_used,
         files_modified,
+        modified_paths,
     )

@@ -76,6 +76,7 @@ class ChatResponse(BaseModel):
     status: str = Field(default="ok", description="Status indicator")
     tools_used: list[str] = Field(default_factory=list, description="Tools called during response generation")
     files_modified: bool = Field(default=False, description="Whether files were created or updated")
+    modified_files: list[str] = Field(default_factory=list, description="Workspace-relative paths of modified files")
 
 
 class FileListResponse(BaseModel):
@@ -150,7 +151,7 @@ async def serve_index():
 def _execute_read_file(path_str: str) -> FileReadResponse:
     """Helper to read workspace file and map domain exceptions to HTTP status codes."""
     try:
-        rel_path, content, size = read_workspace_file(path_str)
+        rel_path, content, size = read_workspace_file(path_str, workspace_root=get_workspace_root())
         return FileReadResponse(path=rel_path, content=content, size=size)
     except FileNotFoundError as exc:
         raise HTTPException(
@@ -199,6 +200,7 @@ def _execute_write_file(payload: FileWriteRequest) -> FileWriteResponse:
             rel_path_str=payload.path,
             content=payload.content,
             overwrite=payload.overwrite,
+            workspace_root=get_workspace_root(),
         )
         return FileWriteResponse(
             path=rel_path,
@@ -258,7 +260,7 @@ async def list_files_endpoint():
     Returns workspace-relative paths (using forward slashes) and the total file count.
     """
     try:
-        files = list_workspace_files()
+        files = list_workspace_files(workspace_root=get_workspace_root())
         return FileListResponse(files=files, count=len(files))
     except Exception as exc:
         logger.error(f"Error listing workspace files: {exc}")
@@ -413,7 +415,7 @@ async def chat_endpoint(request: Request, payload: ChatRequest):
                 last_err = None
                 for model_name in models_to_try:
                     try:
-                        reply, tools, modified = await run_agent_loop(
+                        reply, tools, modified, modified_paths = await run_agent_loop(
                             client=client,
                             model_name=model_name,
                             contents=list(contents),
@@ -428,6 +430,7 @@ async def chat_endpoint(request: Request, payload: ChatRequest):
                                 "status": "ok",
                                 "tools_used": tools,
                                 "files_modified": modified,
+                                "modified_files": modified_paths,
                             })
                         )
                         return
@@ -464,7 +467,7 @@ async def chat_endpoint(request: Request, payload: ChatRequest):
 
     for model_name in models_to_try:
         try:
-            reply, tools_used, files_modified = await run_agent_loop(
+            reply, tools_used, files_modified, modified_paths = await run_agent_loop(
                 client=client,
                 model_name=model_name,
                 contents=list(contents),
@@ -476,6 +479,7 @@ async def chat_endpoint(request: Request, payload: ChatRequest):
                 status="ok",
                 tools_used=tools_used,
                 files_modified=files_modified,
+                modified_files=modified_paths,
             )
 
         except (errors.APIError, errors.ClientError, errors.ServerError) as exc:
